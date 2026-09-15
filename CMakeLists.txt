@@ -5,13 +5,22 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_path(LIBURING_INCLUDE_DIR NAMES liburing.h)
+find_library(LIBURING_LIBRARY NAMES liburing uring)
+
+if (NOT LIBURING_INCLUDE_DIR OR NOT LIBURING_LIBRARY)
+    message(FATAL_ERROR "liburing is required for the async I/O layer")
+endif()
+
 add_library(filesystem_core
+    src/async_io.cpp
     src/block_device.cpp
     src/disk_format.cpp
     src/bitmap.cpp
 )
 
-target_include_directories(filesystem_core PUBLIC include)
+target_include_directories(filesystem_core PUBLIC include ${LIBURING_INCLUDE_DIR})
+target_link_libraries(filesystem_core PUBLIC ${LIBURING_LIBRARY})
 target_compile_options(filesystem_core PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(filesystem main.cpp)
@@ -25,3 +34,7 @@ target_compile_options(filesystem-mkfs PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(filesystem-dumpfs tools/dumpfs.cpp)
 target_link_libraries(filesystem-dumpfs PRIVATE filesystem_core)
 target_compile_options(filesystem-dumpfs PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(filesystem-async-io-demo tools/async_io_demo.cpp)
+target_link_libraries(filesystem-async-io-demo PRIVATE filesystem_core)
+target_compile_options(filesystem-async-io-demo PRIVATE -Wall -Wextra -Wpedantic)
