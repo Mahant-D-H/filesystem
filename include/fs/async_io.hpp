@@ -34,6 +34,8 @@ public:
     void submit();
     bool wait_for(Request& request);
     void wait_all();
+    // Releases completed request bookkeeping after callers no longer need Request pointers.
+    void clear_completed();
 
     static void* allocate_aligned_buffer(size_t length);
     static void free_aligned_buffer(void* buffer);

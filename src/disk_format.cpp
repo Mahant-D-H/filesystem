@@ -74,13 +74,10 @@ bool try_reserve_data_range(Bitmap& bitmap, uint64_t required, uint64_t& start_i
 }
 
 void release_data_range(Bitmap& bitmap, uint64_t start_index, uint64_t length) {
-    if (length == 0) {
-        return;
+    if (start_index > bitmap.bit_count() || length > bitmap.bit_count() - start_index) {
+        throw out_of_range("extent exceeds data bitmap bounds");
     }
     for (uint64_t i = start_index; i < start_index + length; ++i) {
-        if (i >= bitmap.bit_count()) {
-            throw out_of_range("extent exceeds data bitmap bounds");
-        }
         bitmap.set(i, false);
     }
 }
@@ -89,11 +86,42 @@ uint64_t data_bitmap_index_to_block(const SuperblockDisk& superblock, uint64_t i
     return superblock.data_start + index;
 }
 
+void validate_data_extent(const SuperblockDisk& superblock, const ExtentDisk& extent) {
+    if (extent.length == 0 || extent.start < superblock.data_start ||
+        extent.start - superblock.data_start >= superblock.data_blocks ||
+        extent.length > superblock.data_blocks - (extent.start - superblock.data_start)) {
+        throw invalid_argument("extent is outside the data region");
+    }
+}
+
+vector<byte> read_bitmap_blocks(const BlockDevice& device, uint64_t start_block, uint64_t block_count) {
+    vector<byte> raw(block_count * kBlockSize, byte{});
+    if (!raw.empty()) {
+        device.read_at(start_block * kBlockSize, raw);
+    }
+    return raw;
+}
+
+void write_bitmap_blocks(BlockDevice& device, uint64_t start_block, uint64_t block_count,
+                         span<const byte> bitmap_bytes) {
+    vector<byte> raw(block_count * kBlockSize, byte{});
+    if (bitmap_bytes.size() > raw.size()) {
+        throw invalid_argument("bitmap does not fit its on-disk allocation");
+    }
+    copy(bitmap_bytes.begin(), bitmap_bytes.end(), raw.begin());
+    if (!raw.empty()) {
+        device.write_at(start_block * kBlockSize, raw);
+    }
+}
+
 } // namespace end
 
 Layout calculate_layout(uint64_t image_size) {
     if (image_size < 16 * kBlockSize) {
         throw invalid_argument("image must be at least 64 KiB");
+    }
+    if (image_size % kBlockSize != 0) {
+        throw invalid_argument("image size must be a multiple of 4 KiB");
     }
     const uint64_t total_blocks = image_size / kBlockSize;
     const uint64_t total_inodes =
@@ -153,9 +181,19 @@ void validate_superblock(const SuperblockDisk& superblock, uint64_t image_size) 
     if (superblock.block_size != kBlockSize) {
         throw runtime_error("unsupported filesystem block size");
     }
-    if (superblock.total_blocks != image_size / kBlockSize ||
+    if (image_size % kBlockSize != 0 ||
+        superblock.total_blocks != image_size / kBlockSize ||
         superblock.total_blocks == 0 ||
+        superblock.inode_bitmap_start != 1 ||
+        superblock.inode_bitmap_blocks == 0 ||
+        superblock.data_bitmap_start != superblock.inode_bitmap_start + superblock.inode_bitmap_blocks ||
+        superblock.data_bitmap_blocks == 0 ||
+        superblock.inode_table_start != superblock.data_bitmap_start + superblock.data_bitmap_blocks ||
+        superblock.inode_table_blocks == 0 ||
+        superblock.data_start != superblock.inode_table_start + superblock.inode_table_blocks ||
         superblock.data_start >= superblock.total_blocks ||
+        superblock.data_blocks != superblock.total_blocks - superblock.data_start ||
+        superblock.total_inodes == 0 ||
         superblock.root_inode >= superblock.total_inodes) {
         throw runtime_error("invalid filesystem geometry");
     }
@@ -185,12 +223,10 @@ void write_inode(BlockDevice& device, const SuperblockDisk& superblock, const In
 
 Bitmap read_data_bitmap(const BlockDevice& device, const SuperblockDisk& superblock) {
     const uint64_t byte_count = (superblock.data_blocks + 7) / 8;
-    vector<byte> raw(byte_count, byte{});
-    if (byte_count != 0) {
-        device.read_at(superblock.data_bitmap_start * kBlockSize, span<byte>(raw.data(), raw.size()));
-    }
+    vector<byte> raw = read_bitmap_blocks(device, superblock.data_bitmap_start,
+                                          superblock.data_bitmap_blocks);
     Bitmap bitmap(superblock.data_blocks);
-    for (size_t i = 0; i < raw.size(); ++i) {
+    for (size_t i = 0; i < byte_count; ++i) {
         const auto value = to_integer<unsigned char>(raw[i]);
         for (size_t bit_index = 0; bit_index < 8; ++bit_index) {
             const size_t absolute_index = (i * 8) + bit_index;
@@ -204,23 +240,19 @@ Bitmap read_data_bitmap(const BlockDevice& device, const SuperblockDisk& superbl
 }
 
 void write_data_bitmap(BlockDevice& device, const SuperblockDisk& superblock, const Bitmap& bitmap) {
-    const size_t byte_count = bitmap.byte_count();
-    if (byte_count == 0) {
-        return;
+    if (bitmap.bit_count() != superblock.data_blocks) {
+        throw invalid_argument("data bitmap has the wrong number of bits");
     }
-    vector<byte> raw(byte_count, byte{});
-    for (size_t i = 0; i < byte_count; ++i) {
-        raw[i] = bitmap.bytes()[i];
-    }
-    device.write_at(superblock.data_bitmap_start * kBlockSize, span<const byte>(raw.data(), raw.size()));
+    write_bitmap_blocks(device, superblock.data_bitmap_start, superblock.data_bitmap_blocks,
+                        bitmap.bytes());
 }
 
 vector<ExtentDisk> read_inode_extents(const BlockDevice& device, const SuperblockDisk& superblock, const InodeDisk& inode) {
-    (void)superblock;
     vector<ExtentDisk> extents;
     for (uint64_t i = 0; i < 10; ++i) {
-        if (inode.direct_blocks[i] != 0) {
-            extents.push_back(ExtentDisk{inode.direct_blocks[i], 1});
+        if (inode.direct_extents[i].length != 0) {
+            validate_data_extent(superblock, inode.direct_extents[i]);
+            extents.push_back(inode.direct_extents[i]);
         }
     }
     if (inode.single_indirect_block != 0) {
@@ -228,12 +260,14 @@ vector<ExtentDisk> read_inode_extents(const BlockDevice& device, const Superbloc
         device.read_at(inode.single_indirect_block * kBlockSize, block);
         const auto* table = reinterpret_cast<const ExtentTableBlock*>(block.data());
         const uint32_t count = table->entry_count;
+        if (count > kExtentTableEntriesPerBlock) {
+            throw runtime_error("invalid inode extent table entry count");
+        }
         for (uint32_t i = 0; i < count; ++i) {
-            if (i < kExtentTableEntriesPerBlock) {
-                const auto& entry = table->extents[i];
-                if (entry.length != 0) {
-                    extents.push_back(entry);
-                }
+            const auto& entry = table->extents[i];
+            if (entry.length != 0) {
+                validate_data_extent(superblock, entry);
+                extents.push_back(entry);
             }
         }
     }
@@ -241,19 +275,23 @@ vector<ExtentDisk> read_inode_extents(const BlockDevice& device, const Superbloc
 }
 
 void write_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, const vector<ExtentDisk>& extents) {
+    if (extents.size() > 10 + kExtentTableEntriesPerBlock) {
+        throw invalid_argument("too many extents for inode metadata");
+    }
+    for (const auto& extent : extents) {
+        validate_data_extent(superblock, extent);
+    }
+
+    const uint64_t old_indirect_block = inode.single_indirect_block;
     for (uint64_t i = 0; i < 10; ++i) {
-        inode.direct_blocks[i] = 0;
+        inode.direct_extents[i] = {};
     }
     inode.single_indirect_block = 0;
     inode.allocated_blocks = 0;
 
-    if (extents.empty()) {
-        return;
-    }
-
     const uint64_t direct_count = min<uint64_t>(extents.size(), 10);
     for (uint64_t i = 0; i < direct_count; ++i) {
-        inode.direct_blocks[i] = extents[i].start;
+        inode.direct_extents[i] = extents[i];
         inode.allocated_blocks += extents[i].length;
     }
 
@@ -264,26 +302,39 @@ void write_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, 
             table.extents[i - 10] = extents[i];
             inode.allocated_blocks += extents[i].length;
         }
-        if (extents.size() > 10 + kExtentTableEntriesPerBlock) {
-            throw invalid_argument("too many extents for inode metadata");
-        }
-
         Bitmap bitmap = read_data_bitmap(device, superblock);
-        uint64_t indirect_index = 0;
-        if (!try_reserve_data_range(bitmap, 1, indirect_index)) {
-            throw runtime_error("no free blocks for inode indirect extent table");
+        if (old_indirect_block >= superblock.data_start &&
+            old_indirect_block - superblock.data_start < superblock.data_blocks) {
+            inode.single_indirect_block = old_indirect_block;
+        } else {
+            uint64_t indirect_index = 0;
+            if (!try_reserve_data_range(bitmap, 1, indirect_index)) {
+                throw runtime_error("no free blocks for inode indirect extent table");
+            }
+            inode.single_indirect_block = data_bitmap_index_to_block(superblock, indirect_index);
         }
-        inode.single_indirect_block = data_bitmap_index_to_block(superblock, indirect_index);
         array<byte, kBlockSize> block {};
         memcpy(block.data(), &table, sizeof(table));
         device.write_at(inode.single_indirect_block * kBlockSize, block);
         write_data_bitmap(device, superblock, bitmap);
+    } else if (old_indirect_block >= superblock.data_start &&
+               old_indirect_block - superblock.data_start < superblock.data_blocks) {
+        Bitmap bitmap = read_data_bitmap(device, superblock);
+        release_data_range(bitmap, old_indirect_block - superblock.data_start, 1);
+        write_data_bitmap(device, superblock, bitmap);
     }
+
+    write_inode(device, superblock, inode);
 }
 
 vector<ExtentDisk> allocate_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, uint64_t block_count) {
     if (block_count == 0) {
         return {};
+    }
+
+    vector<ExtentDisk> extents = read_inode_extents(device, superblock, inode);
+    if (extents.size() == 10 + kExtentTableEntriesPerBlock) {
+        throw runtime_error("inode has no remaining extent metadata slots");
     }
 
     Bitmap bitmap = read_data_bitmap(device, superblock);
@@ -292,12 +343,11 @@ vector<ExtentDisk> allocate_inode_extents(BlockDevice& device, const SuperblockD
         throw runtime_error("not enough contiguous blocks available for allocation");
     }
 
-    vector<ExtentDisk> extents(1);
-    extents[0].start = data_bitmap_index_to_block(superblock, start_index);
-    extents[0].length = block_count;
+    ExtentDisk allocated{data_bitmap_index_to_block(superblock, start_index), block_count};
+    extents.push_back(allocated);
     write_data_bitmap(device, superblock, bitmap);
     write_inode_extents(device, superblock, inode, extents);
-    return extents;
+    return {allocated};
 }
 
 bool release_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode) {
@@ -326,7 +376,9 @@ bool release_inode_extents(BlockDevice& device, const SuperblockDisk& superblock
     }
 
     write_data_bitmap(device, superblock, bitmap);
-    inode.direct_blocks[0] = 0;
+    for (auto& extent : inode.direct_extents) {
+        extent = {};
+    }
     inode.single_indirect_block = 0;
     inode.allocated_blocks = 0;
     write_inode(device, superblock, inode);
@@ -366,11 +418,13 @@ void format_image(BlockDevice& device) {
 
     Bitmap inode_bitmap(layout.total_inodes);
     inode_bitmap.set(0, true);
-    device.write_at(layout.inode_bitmap_start * kBlockSize, inode_bitmap.bytes());
+    write_bitmap_blocks(device, layout.inode_bitmap_start, layout.inode_bitmap_blocks,
+                        inode_bitmap.bytes());
 
     Bitmap data_bitmap(layout.data_blocks);
     data_bitmap.set(0, true); // Reserve the first data block for the root directory.
-    device.write_at(layout.data_bitmap_start * kBlockSize, data_bitmap.bytes());
+    write_bitmap_blocks(device, layout.data_bitmap_start, layout.data_bitmap_blocks,
+                        data_bitmap.bytes());
 
     InodeDisk root {};
     root.inode_number = 0;
@@ -380,7 +434,7 @@ void format_image(BlockDevice& device) {
     root.gid = 0;
     root.link_count = 2;
     root.allocated_blocks = 1;
-    root.direct_blocks[0] = layout.data_start;
+    root.direct_extents[0] = ExtentDisk{layout.data_start, 1};
     const auto now = chrono::system_clock::to_time_t(chrono::system_clock::now());
     root.atime = now;
     root.mtime = now;

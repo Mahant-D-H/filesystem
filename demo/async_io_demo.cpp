@@ -34,8 +34,9 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    const char* message = "Hello from my filesystem!";
     void* raw_write = fs::AsyncIo::allocate_aligned_buffer(kBlockSize);
-    memcpy(raw_write, test_pattern.data(), kBlockSize);
+    memcpy(raw_write, message, strlen(message) + 1);
 
     void* raw_read = fs::AsyncIo::allocate_aligned_buffer(kBlockSize);
     memset(raw_read, 0, kBlockSize);
@@ -50,7 +51,9 @@ int main() {
         cerr << "demo: async write failed\n";
         return EXIT_FAILURE;
     }
+    cout << "Write successful\n";
 
+    cout << "Reading from filesystem: ";
     auto* read_req = io.submit_read(fd, 0, raw_read, kBlockSize);
     io.submit();
     if (!io.wait_for(*read_req)) {
@@ -60,8 +63,9 @@ int main() {
         cerr << "demo: async read failed\n";
         return EXIT_FAILURE;
     }
+    cout << static_cast<char*>(raw_read) << '\n';
 
-    const bool matches = memcmp(raw_read, test_pattern.data(), kBlockSize) == 0;
+    const bool matches = memcmp(raw_read, raw_write, kBlockSize) == 0;
     fs::AsyncIo::free_aligned_buffer(raw_write);
     fs::AsyncIo::free_aligned_buffer(raw_read);
     ::close(fd);

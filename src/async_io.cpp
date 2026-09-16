@@ -28,8 +28,9 @@ AsyncIo::AsyncIo(size_t queue_depth): queue_depth_(queue_depth) {
     if (queue_depth_ == 0) {
         throw invalid_argument("io_uring queue depth must be greater than zero");
     }
-    if (io_uring_queue_init(static_cast<unsigned>(queue_depth_), &ring_, 0) != 0) {
-        throw system_error(errno, generic_category(), "io_uring_queue_init");
+    const int result = io_uring_queue_init(static_cast<unsigned>(queue_depth_), &ring_, 0);
+    if (result < 0) {
+        throw system_error(-result, generic_category(), "io_uring_queue_init");
     }
 }
 
@@ -125,7 +126,7 @@ bool AsyncIo::wait_for(Request& request) {
         process_completion(cqe);
         io_uring_cqe_seen(&ring_, cqe);
     }
-    return request.result >= 0;
+    return request.result == static_cast<int>(request.length);
 }
 
 void AsyncIo::wait_all() {
@@ -152,6 +153,15 @@ void AsyncIo::wait_all() {
             break;
         }
     }
+}
+
+void AsyncIo::clear_completed() {
+    for (const Request& request : requests_) {
+        if (!request.completed) {
+            throw logic_error("cannot clear incomplete async I/O requests");
+        }
+    }
+    requests_.clear();
 }
 
 void* AsyncIo::allocate_aligned_buffer(size_t length) {

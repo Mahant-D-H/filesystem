@@ -17,6 +17,7 @@ add_library(filesystem_core
     src/block_device.cpp
     src/disk_format.cpp
     src/bitmap.cpp
+    src/buffer_pool.cpp
     src/extent.cpp
 )
 
@@ -36,10 +37,19 @@ add_executable(filesystem-dumpfs tools/dumpfs.cpp)
 target_link_libraries(filesystem-dumpfs PRIVATE filesystem_core)
 target_compile_options(filesystem-dumpfs PRIVATE -Wall -Wextra -Wpedantic)
 
-add_executable(filesystem-async-io-demo tools/async_io_demo.cpp)
+add_executable(filesystem-async-io-demo demo/async_io_demo.cpp
+)
 target_link_libraries(filesystem-async-io-demo PRIVATE filesystem_core)
 target_compile_options(filesystem-async-io-demo PRIVATE -Wall -Wextra -Wpedantic)
 
-add_executable(filesystem-extent-demo tools/extent_demo.cpp)
+add_executable(filesystem-extent-demo demo/extent_demo.cpp)
 target_link_libraries(filesystem-extent-demo PRIVATE filesystem_core)
 target_compile_options(filesystem-extent-demo PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(filesystem-buffer-pool-demo demo/buffer_pool_demo.cpp)
+target_link_libraries(filesystem-buffer-pool-demo PRIVATE filesystem_core)
+target_compile_options(filesystem-buffer-pool-demo PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(filesystem-metadata-demo demo/metadata_demo.cpp)
+target_link_libraries(filesystem-metadata-demo PRIVATE filesystem_core)
+target_compile_options(filesystem-metadata-demo PRIVATE -Wall -Wextra -Wpedantic)

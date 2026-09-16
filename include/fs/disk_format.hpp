@@ -13,7 +13,7 @@ using namespace std;
 namespace fs {
 
 inline constexpr uint32_t kBlockSize = 4 * 1024; // BlockSize = 4KB
-inline constexpr uint32_t kFormatVersion = 1;
+inline constexpr uint32_t kFormatVersion = 2;
 inline constexpr uint64_t kSuperblockMagic = 0x315359534653ULL;
 inline constexpr uint32_t kInodeSize = 256;
 inline constexpr uint32_t kDefaultInodesPer16KiB = 1;
@@ -47,6 +47,11 @@ struct SuperblockDisk {
     uint64_t checksum;
 };
 
+struct ExtentDisk {
+    uint64_t start = 0;
+    uint64_t length = 0;
+};
+
 struct InodeDisk {
     uint64_t inode_number;
     uint8_t file_type;
@@ -62,9 +67,9 @@ struct InodeDisk {
     int64_t ctime;
     uint32_t flags;
     uint32_t reserved1;
-    uint64_t direct_blocks[10];
+    ExtentDisk direct_extents[10];
     uint64_t single_indirect_block;
-    uint8_t reserved2[88];
+    uint8_t reserved2[8];
 };
 
 static_assert(sizeof(InodeDisk) == kInodeSize);
@@ -80,11 +85,6 @@ struct Layout {
     uint64_t inode_table_blocks;
     uint64_t data_start;
     uint64_t data_blocks;
-};
-
-struct ExtentDisk {
-    uint64_t start = 0;
-    uint64_t length = 0;
 };
 
 struct ExtentTableBlock {
