@@ -1,10 +1,14 @@
 #pragma once
 
+#include "fs/bitmap.hpp"
 #include "fs/block_device.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
+
+using namespace std;
 
 namespace fs {
 
@@ -13,6 +17,7 @@ inline constexpr uint32_t kFormatVersion = 1;
 inline constexpr uint64_t kSuperblockMagic = 0x315359534653ULL;
 inline constexpr uint32_t kInodeSize = 256;
 inline constexpr uint32_t kDefaultInodesPer16KiB = 1;
+inline constexpr uint32_t kExtentTableEntriesPerBlock = 255;
 
 enum class FileType : uint8_t {
     Free = 0,
@@ -77,11 +82,34 @@ struct Layout {
     uint64_t data_blocks;
 };
 
+struct ExtentDisk {
+    uint64_t start = 0;
+    uint64_t length = 0;
+};
+
+struct ExtentTableBlock {
+    uint32_t entry_count = 0;
+    uint32_t reserved = 0;
+    ExtentDisk extents[kExtentTableEntriesPerBlock];
+};
+
 Layout calculate_layout(uint64_t image_size);
 void format_image(BlockDevice& device);
 SuperblockDisk read_superblock(BlockDevice& device);
 void write_superblock(BlockDevice& device, const SuperblockDisk& superblock);
 void validate_superblock(const SuperblockDisk& superblock, uint64_t image_size);
+
+InodeDisk read_inode(BlockDevice& device, const SuperblockDisk& superblock, uint64_t index);
+void write_inode(BlockDevice& device, const SuperblockDisk& superblock, const InodeDisk& inode);
+
+vector<ExtentDisk> read_inode_extents(const BlockDevice& device, const SuperblockDisk& superblock, const InodeDisk& inode);
+void write_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, const vector<ExtentDisk>& extents);
+vector<ExtentDisk> allocate_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, uint64_t block_count);
+bool release_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode);
+
+Bitmap read_data_bitmap(const BlockDevice& device, const SuperblockDisk& superblock);
+void write_data_bitmap(BlockDevice& device, const SuperblockDisk& superblock, const Bitmap& bitmap);
+
 string file_type_name(FileType type);
 string uuid_string(const char (&uuid)[16]);
 

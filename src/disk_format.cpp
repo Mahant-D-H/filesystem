@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <sys/stat.h>
 
+using namespace std;
+
 namespace fs {
 namespace {
 
@@ -24,6 +26,67 @@ uint64_t checksum(const SuperblockDisk& superblock) {
         result *= 1099511628211ULL;
     }
     return result;
+}
+
+void write_inode_table_entry(BlockDevice& device, const SuperblockDisk& superblock, uint64_t inode_index, const InodeDisk& inode) {
+    const uint64_t inode_offset = inode_index * kInodeSize;
+    const uint64_t block_index = superblock.inode_table_start + (inode_offset / kBlockSize);
+    const uint64_t block_offset = inode_offset % kBlockSize;
+    array<byte, kBlockSize> block {};
+    device.read_at(block_index * kBlockSize, block);
+    memcpy(block.data() + block_offset, &inode, sizeof(inode));
+    device.write_at(block_index * kBlockSize, block);
+}
+
+void read_inode_table_entry(const BlockDevice& device, const SuperblockDisk& superblock, uint64_t inode_index, InodeDisk& inode) {
+    const uint64_t inode_offset = inode_index * kInodeSize;
+    const uint64_t block_index = superblock.inode_table_start + (inode_offset / kBlockSize);
+    const uint64_t block_offset = inode_offset % kBlockSize;
+    array<byte, kBlockSize> block {};
+    device.read_at(block_index * kBlockSize, block);
+    memcpy(&inode, block.data() + block_offset, sizeof(inode));
+}
+
+bool try_reserve_data_range(Bitmap& bitmap, uint64_t required, uint64_t& start_index) {
+    if (required == 0) {
+        return true;
+    }
+    uint64_t run_start = 0;
+    uint64_t run_length = 0;
+    for (uint64_t index = 0; index < bitmap.bit_count(); ++index) {
+        if (!bitmap.get(index)) {
+            if (run_length == 0) {
+                run_start = index;
+            }
+            ++run_length;
+            if (run_length == required) {
+                start_index = run_start;
+                for (uint64_t i = run_start; i < run_start + required; ++i) {
+                    bitmap.set(i, true);
+                }
+                return true;
+            }
+        } else {
+            run_length = 0;
+        }
+    }
+    return false;
+}
+
+void release_data_range(Bitmap& bitmap, uint64_t start_index, uint64_t length) {
+    if (length == 0) {
+        return;
+    }
+    for (uint64_t i = start_index; i < start_index + length; ++i) {
+        if (i >= bitmap.bit_count()) {
+            throw out_of_range("extent exceeds data bitmap bounds");
+        }
+        bitmap.set(i, false);
+    }
+}
+
+uint64_t data_bitmap_index_to_block(const SuperblockDisk& superblock, uint64_t index) {
+    return superblock.data_start + index;
 }
 
 } // namespace end
@@ -102,6 +165,172 @@ void validate_superblock(const SuperblockDisk& superblock, uint64_t image_size) 
     if (checksum(copy) != expected) {
         throw runtime_error("superblock checksum mismatch");
     }
+}
+
+InodeDisk read_inode(BlockDevice& device, const SuperblockDisk& superblock, uint64_t index) {
+    if (index >= superblock.total_inodes) {
+        throw out_of_range("inode index out of range");
+    }
+    InodeDisk inode {};
+    read_inode_table_entry(device, superblock, index, inode);
+    return inode;
+}
+
+void write_inode(BlockDevice& device, const SuperblockDisk& superblock, const InodeDisk& inode) {
+    if (inode.inode_number >= superblock.total_inodes) {
+        throw out_of_range("inode number out of range");
+    }
+    write_inode_table_entry(device, superblock, inode.inode_number, inode);
+}
+
+Bitmap read_data_bitmap(const BlockDevice& device, const SuperblockDisk& superblock) {
+    const uint64_t byte_count = (superblock.data_blocks + 7) / 8;
+    vector<byte> raw(byte_count, byte{});
+    if (byte_count != 0) {
+        device.read_at(superblock.data_bitmap_start * kBlockSize, span<byte>(raw.data(), raw.size()));
+    }
+    Bitmap bitmap(superblock.data_blocks);
+    for (size_t i = 0; i < raw.size(); ++i) {
+        const auto value = to_integer<unsigned char>(raw[i]);
+        for (size_t bit_index = 0; bit_index < 8; ++bit_index) {
+            const size_t absolute_index = (i * 8) + bit_index;
+            if (absolute_index >= superblock.data_blocks) {
+                break;
+            }
+            bitmap.set(absolute_index, (value & (1u << bit_index)) != 0);
+        }
+    }
+    return bitmap;
+}
+
+void write_data_bitmap(BlockDevice& device, const SuperblockDisk& superblock, const Bitmap& bitmap) {
+    const size_t byte_count = bitmap.byte_count();
+    if (byte_count == 0) {
+        return;
+    }
+    vector<byte> raw(byte_count, byte{});
+    for (size_t i = 0; i < byte_count; ++i) {
+        raw[i] = bitmap.bytes()[i];
+    }
+    device.write_at(superblock.data_bitmap_start * kBlockSize, span<const byte>(raw.data(), raw.size()));
+}
+
+vector<ExtentDisk> read_inode_extents(const BlockDevice& device, const SuperblockDisk& superblock, const InodeDisk& inode) {
+    (void)superblock;
+    vector<ExtentDisk> extents;
+    for (uint64_t i = 0; i < 10; ++i) {
+        if (inode.direct_blocks[i] != 0) {
+            extents.push_back(ExtentDisk{inode.direct_blocks[i], 1});
+        }
+    }
+    if (inode.single_indirect_block != 0) {
+        array<byte, kBlockSize> block {};
+        device.read_at(inode.single_indirect_block * kBlockSize, block);
+        const auto* table = reinterpret_cast<const ExtentTableBlock*>(block.data());
+        const uint32_t count = table->entry_count;
+        for (uint32_t i = 0; i < count; ++i) {
+            if (i < kExtentTableEntriesPerBlock) {
+                const auto& entry = table->extents[i];
+                if (entry.length != 0) {
+                    extents.push_back(entry);
+                }
+            }
+        }
+    }
+    return extents;
+}
+
+void write_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, const vector<ExtentDisk>& extents) {
+    for (uint64_t i = 0; i < 10; ++i) {
+        inode.direct_blocks[i] = 0;
+    }
+    inode.single_indirect_block = 0;
+    inode.allocated_blocks = 0;
+
+    if (extents.empty()) {
+        return;
+    }
+
+    const uint64_t direct_count = min<uint64_t>(extents.size(), 10);
+    for (uint64_t i = 0; i < direct_count; ++i) {
+        inode.direct_blocks[i] = extents[i].start;
+        inode.allocated_blocks += extents[i].length;
+    }
+
+    if (extents.size() > 10) {
+        ExtentTableBlock table {};
+        table.entry_count = static_cast<uint32_t>(extents.size() - 10);
+        for (size_t i = 10; i < extents.size() && i - 10 < kExtentTableEntriesPerBlock; ++i) {
+            table.extents[i - 10] = extents[i];
+            inode.allocated_blocks += extents[i].length;
+        }
+        if (extents.size() > 10 + kExtentTableEntriesPerBlock) {
+            throw invalid_argument("too many extents for inode metadata");
+        }
+
+        Bitmap bitmap = read_data_bitmap(device, superblock);
+        uint64_t indirect_index = 0;
+        if (!try_reserve_data_range(bitmap, 1, indirect_index)) {
+            throw runtime_error("no free blocks for inode indirect extent table");
+        }
+        inode.single_indirect_block = data_bitmap_index_to_block(superblock, indirect_index);
+        array<byte, kBlockSize> block {};
+        memcpy(block.data(), &table, sizeof(table));
+        device.write_at(inode.single_indirect_block * kBlockSize, block);
+        write_data_bitmap(device, superblock, bitmap);
+    }
+}
+
+vector<ExtentDisk> allocate_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, uint64_t block_count) {
+    if (block_count == 0) {
+        return {};
+    }
+
+    Bitmap bitmap = read_data_bitmap(device, superblock);
+    uint64_t start_index = 0;
+    if (!try_reserve_data_range(bitmap, block_count, start_index)) {
+        throw runtime_error("not enough contiguous blocks available for allocation");
+    }
+
+    vector<ExtentDisk> extents(1);
+    extents[0].start = data_bitmap_index_to_block(superblock, start_index);
+    extents[0].length = block_count;
+    write_data_bitmap(device, superblock, bitmap);
+    write_inode_extents(device, superblock, inode, extents);
+    return extents;
+}
+
+bool release_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode) {
+    vector<ExtentDisk> extents = read_inode_extents(device, superblock, inode);
+    if (extents.empty()) {
+        return true;
+    }
+
+    Bitmap bitmap = read_data_bitmap(device, superblock);
+    for (const auto& extent : extents) {
+        if (extent.start == 0 || extent.length == 0) {
+            continue;
+        }
+        const uint64_t start_index = extent.start - superblock.data_start;
+        if (start_index >= superblock.data_blocks) {
+            continue;
+        }
+        release_data_range(bitmap, start_index, extent.length);
+    }
+
+    if (inode.single_indirect_block != 0) {
+        const uint64_t indirect_index = inode.single_indirect_block - superblock.data_start;
+        if (indirect_index < superblock.data_blocks) {
+            release_data_range(bitmap, indirect_index, 1);
+        }
+    }
+
+    write_data_bitmap(device, superblock, bitmap);
+    inode.direct_blocks[0] = 0;
+    inode.single_indirect_block = 0;
+    inode.allocated_blocks = 0;
+    write_inode(device, superblock, inode);
+    return true;
 }
 
 void format_image(BlockDevice& device) {
