@@ -47,27 +47,32 @@ void read_inode_table_entry(const BlockDevice& device, const SuperblockDisk& sup
     memcpy(&inode, block.data() + block_offset, sizeof(inode));
 }
 
-bool try_reserve_data_range(Bitmap& bitmap, uint64_t required, uint64_t& start_index) {
+bool try_reserve_data_range(Bitmap& bitmap, uint64_t required, uint64_t& start_index,
+                            uint64_t alignment_blocks = 1, uint64_t block_base = 0) {
     if (required == 0) {
         return true;
     }
-    uint64_t run_start = 0;
-    uint64_t run_length = 0;
+    if (alignment_blocks == 0) {
+        throw invalid_argument("extent alignment must be greater than zero");
+    }
     for (uint64_t index = 0; index < bitmap.bit_count(); ++index) {
-        if (!bitmap.get(index)) {
-            if (run_length == 0) {
-                run_start = index;
+        const uint64_t absolute_block = block_base + index;
+        if (absolute_block % alignment_blocks != 0 || required > bitmap.bit_count() - index) {
+            continue;
+        }
+        bool free = true;
+        for (uint64_t candidate = index; candidate < index + required; ++candidate) {
+            if (bitmap.get(candidate)) {
+                free = false;
+                break;
             }
-            ++run_length;
-            if (run_length == required) {
-                start_index = run_start;
-                for (uint64_t i = run_start; i < run_start + required; ++i) {
-                    bitmap.set(i, true);
-                }
-                return true;
+        }
+        if (free) {
+            start_index = index;
+            for (uint64_t candidate = index; candidate < index + required; ++candidate) {
+                bitmap.set(candidate, true);
             }
-        } else {
-            run_length = 0;
+            return true;
         }
     }
     return false;
@@ -221,6 +226,70 @@ void write_inode(BlockDevice& device, const SuperblockDisk& superblock, const In
     write_inode_table_entry(device, superblock, inode.inode_number, inode);
 }
 
+Bitmap read_inode_bitmap(const BlockDevice& device, const SuperblockDisk& superblock) {
+    const uint64_t byte_count = (superblock.total_inodes + 7) / 8;
+    vector<byte> raw = read_bitmap_blocks(device, superblock.inode_bitmap_start,
+                                          superblock.inode_bitmap_blocks);
+    Bitmap bitmap(superblock.total_inodes);
+    for (size_t index = 0; index < byte_count; ++index) {
+        const auto value = to_integer<unsigned char>(raw[index]);
+        for (size_t bit = 0; bit < 8 && index * 8 + bit < superblock.total_inodes; ++bit) {
+            bitmap.set(index * 8 + bit, (value & (1u << bit)) != 0);
+        }
+    }
+    return bitmap;
+}
+
+void write_inode_bitmap(BlockDevice& device, const SuperblockDisk& superblock, const Bitmap& bitmap) {
+    if (bitmap.bit_count() != superblock.total_inodes) {
+        throw invalid_argument("inode bitmap has the wrong number of bits");
+    }
+    write_bitmap_blocks(device, superblock.inode_bitmap_start, superblock.inode_bitmap_blocks,
+                        bitmap.bytes());
+}
+
+InodeDisk allocate_inode(BlockDevice& device, const SuperblockDisk& superblock, FileType type, uint32_t mode) {
+    if (type == FileType::Free) {
+        throw invalid_argument("cannot allocate a free inode");
+    }
+    Bitmap bitmap = read_inode_bitmap(device, superblock);
+    const auto free_index = bitmap.find_free();
+    if (!free_index) {
+        throw runtime_error("no free inode available");
+    }
+    bitmap.set(*free_index, true);
+
+    InodeDisk inode {};
+    inode.inode_number = *free_index;
+    inode.file_type = static_cast<uint8_t>(type);
+    inode.mode = mode;
+    inode.link_count = type == FileType::Directory ? 2 : 1;
+    const auto now = chrono::system_clock::to_time_t(chrono::system_clock::now());
+    inode.atime = now;
+    inode.mtime = now;
+    inode.ctime = now;
+    write_inode_bitmap(device, superblock, bitmap);
+    write_inode(device, superblock, inode);
+    return inode;
+}
+
+void release_inode(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode) {
+    if (inode.inode_number == superblock.root_inode) {
+        throw invalid_argument("cannot release the root inode");
+    }
+    release_inode_extents(device, superblock, inode);
+    Bitmap bitmap = read_inode_bitmap(device, superblock);
+    if (inode.inode_number >= bitmap.bit_count() || !bitmap.get(inode.inode_number)) {
+        throw invalid_argument("inode is not allocated");
+    }
+    bitmap.set(inode.inode_number, false);
+    InodeDisk empty {};
+    empty.inode_number = inode.inode_number;
+    write_inode(device, superblock, empty);
+    write_inode_bitmap(device, superblock, bitmap);
+    inode = empty;
+}
+
 Bitmap read_data_bitmap(const BlockDevice& device, const SuperblockDisk& superblock) {
     const uint64_t byte_count = (superblock.data_blocks + 7) / 8;
     vector<byte> raw = read_bitmap_blocks(device, superblock.data_bitmap_start,
@@ -327,7 +396,9 @@ void write_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, 
     write_inode(device, superblock, inode);
 }
 
-vector<ExtentDisk> allocate_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, uint64_t block_count) {
+vector<ExtentDisk> allocate_inode_extents_aligned(BlockDevice& device, const SuperblockDisk& superblock,
+                                                  InodeDisk& inode, uint64_t block_count,
+                                                  uint64_t alignment_blocks) {
     if (block_count == 0) {
         return {};
     }
@@ -339,7 +410,7 @@ vector<ExtentDisk> allocate_inode_extents(BlockDevice& device, const SuperblockD
 
     Bitmap bitmap = read_data_bitmap(device, superblock);
     uint64_t start_index = 0;
-    if (!try_reserve_data_range(bitmap, block_count, start_index)) {
+    if (!try_reserve_data_range(bitmap, block_count, start_index, alignment_blocks, superblock.data_start)) {
         throw runtime_error("not enough contiguous blocks available for allocation");
     }
 
@@ -348,6 +419,11 @@ vector<ExtentDisk> allocate_inode_extents(BlockDevice& device, const SuperblockD
     write_data_bitmap(device, superblock, bitmap);
     write_inode_extents(device, superblock, inode, extents);
     return {allocated};
+}
+
+vector<ExtentDisk> allocate_inode_extents(BlockDevice& device, const SuperblockDisk& superblock,
+                                          InodeDisk& inode, uint64_t block_count) {
+    return allocate_inode_extents_aligned(device, superblock, inode, block_count, 1);
 }
 
 bool release_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode) {

@@ -220,6 +220,19 @@ filesystem-metadata-demo/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem-metadata-demo.dir/build.make CMakeFiles/filesystem-metadata-demo.dir/build
 .PHONY : filesystem-metadata-demo/fast
 
+#=============================================================================
+# Target rules for targets named filesystem-layout-demo
+
+# Build rule for target.
+filesystem-layout-demo: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 filesystem-layout-demo
+.PHONY : filesystem-layout-demo
+
+# fast build rule for target.
+filesystem-layout-demo/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem-layout-demo.dir/build.make CMakeFiles/filesystem-layout-demo.dir/build
+.PHONY : filesystem-layout-demo/fast
+
 demo/async_io_demo.o: demo/async_io_demo.cpp.o
 .PHONY : demo/async_io_demo.o
 
@@ -291,6 +304,30 @@ demo/extent_demo.s: demo/extent_demo.cpp.s
 demo/extent_demo.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem-extent-demo.dir/build.make CMakeFiles/filesystem-extent-demo.dir/demo/extent_demo.cpp.s
 .PHONY : demo/extent_demo.cpp.s
+
+demo/layout_demo.o: demo/layout_demo.cpp.o
+.PHONY : demo/layout_demo.o
+
+# target to build an object file
+demo/layout_demo.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem-layout-demo.dir/build.make CMakeFiles/filesystem-layout-demo.dir/demo/layout_demo.cpp.o
+.PHONY : demo/layout_demo.cpp.o
+
+demo/layout_demo.i: demo/layout_demo.cpp.i
+.PHONY : demo/layout_demo.i
+
+# target to preprocess a source file
+demo/layout_demo.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem-layout-demo.dir/build.make CMakeFiles/filesystem-layout-demo.dir/demo/layout_demo.cpp.i
+.PHONY : demo/layout_demo.cpp.i
+
+demo/layout_demo.s: demo/layout_demo.cpp.s
+.PHONY : demo/layout_demo.s
+
+# target to generate assembly for a file
+demo/layout_demo.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem-layout-demo.dir/build.make CMakeFiles/filesystem-layout-demo.dir/demo/layout_demo.cpp.s
+.PHONY : demo/layout_demo.cpp.s
 
 demo/metadata_demo.o: demo/metadata_demo.cpp.o
 .PHONY : demo/metadata_demo.o
@@ -484,6 +521,30 @@ src/extent.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem_core.dir/build.make CMakeFiles/filesystem_core.dir/src/extent.cpp.s
 .PHONY : src/extent.cpp.s
 
+src/layout_engine.o: src/layout_engine.cpp.o
+.PHONY : src/layout_engine.o
+
+# target to build an object file
+src/layout_engine.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem_core.dir/build.make CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o
+.PHONY : src/layout_engine.cpp.o
+
+src/layout_engine.i: src/layout_engine.cpp.i
+.PHONY : src/layout_engine.i
+
+# target to preprocess a source file
+src/layout_engine.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem_core.dir/build.make CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.i
+.PHONY : src/layout_engine.cpp.i
+
+src/layout_engine.s: src/layout_engine.cpp.s
+.PHONY : src/layout_engine.s
+
+# target to generate assembly for a file
+src/layout_engine.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/filesystem_core.dir/build.make CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.s
+.PHONY : src/layout_engine.cpp.s
+
 tools/dumpfs.o: tools/dumpfs.cpp.o
 .PHONY : tools/dumpfs.o
 
@@ -545,6 +606,7 @@ help:
 	@echo "... filesystem-buffer-pool-demo"
 	@echo "... filesystem-dumpfs"
 	@echo "... filesystem-extent-demo"
+	@echo "... filesystem-layout-demo"
 	@echo "... filesystem-metadata-demo"
 	@echo "... filesystem-mkfs"
 	@echo "... filesystem_core"
@@ -557,6 +619,9 @@ help:
 	@echo "... demo/extent_demo.o"
 	@echo "... demo/extent_demo.i"
 	@echo "... demo/extent_demo.s"
+	@echo "... demo/layout_demo.o"
+	@echo "... demo/layout_demo.i"
+	@echo "... demo/layout_demo.s"
 	@echo "... demo/metadata_demo.o"
 	@echo "... demo/metadata_demo.i"
 	@echo "... demo/metadata_demo.s"
@@ -581,6 +646,9 @@ help:
 	@echo "... src/extent.o"
 	@echo "... src/extent.i"
 	@echo "... src/extent.s"
+	@echo "... src/layout_engine.o"
+	@echo "... src/layout_engine.i"
+	@echo "... src/layout_engine.s"
 	@echo "... tools/dumpfs.o"
 	@echo "... tools/dumpfs.i"
 	@echo "... tools/dumpfs.s"

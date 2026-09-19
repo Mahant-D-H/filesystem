@@ -111,10 +111,24 @@ CMakeFiles/filesystem_core.dir/src/disk_format.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/filesystem_core.dir/src/disk_format.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/fs/CLionProjects/filesystem/src/disk_format.cpp -o CMakeFiles/filesystem_core.dir/src/disk_format.cpp.s
 
+CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o: CMakeFiles/filesystem_core.dir/flags.make
+CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o: /home/fs/CLionProjects/filesystem/src/layout_engine.cpp
+CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o: CMakeFiles/filesystem_core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/fs/CLionProjects/filesystem/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o -MF CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o.d -o CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o -c /home/fs/CLionProjects/filesystem/src/layout_engine.cpp
+
+CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/fs/CLionProjects/filesystem/src/layout_engine.cpp > CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.i
+
+CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/fs/CLionProjects/filesystem/src/layout_engine.cpp -o CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.s
+
 CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o: CMakeFiles/filesystem_core.dir/flags.make
 CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o: /home/fs/CLionProjects/filesystem/src/bitmap.cpp
 CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o: CMakeFiles/filesystem_core.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/fs/CLionProjects/filesystem/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/fs/CLionProjects/filesystem/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o -MF CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o.d -o CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o -c /home/fs/CLionProjects/filesystem/src/bitmap.cpp
 
 CMakeFiles/filesystem_core.dir/src/bitmap.cpp.i: cmake_force
@@ -128,7 +142,7 @@ CMakeFiles/filesystem_core.dir/src/bitmap.cpp.s: cmake_force
 CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o: CMakeFiles/filesystem_core.dir/flags.make
 CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o: /home/fs/CLionProjects/filesystem/src/buffer_pool.cpp
 CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o: CMakeFiles/filesystem_core.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/fs/CLionProjects/filesystem/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/fs/CLionProjects/filesystem/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o -MF CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o.d -o CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o -c /home/fs/CLionProjects/filesystem/src/buffer_pool.cpp
 
 CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.i: cmake_force
@@ -142,7 +156,7 @@ CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.s: cmake_force
 CMakeFiles/filesystem_core.dir/src/extent.cpp.o: CMakeFiles/filesystem_core.dir/flags.make
 CMakeFiles/filesystem_core.dir/src/extent.cpp.o: /home/fs/CLionProjects/filesystem/src/extent.cpp
 CMakeFiles/filesystem_core.dir/src/extent.cpp.o: CMakeFiles/filesystem_core.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/fs/CLionProjects/filesystem/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/filesystem_core.dir/src/extent.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/fs/CLionProjects/filesystem/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/filesystem_core.dir/src/extent.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/filesystem_core.dir/src/extent.cpp.o -MF CMakeFiles/filesystem_core.dir/src/extent.cpp.o.d -o CMakeFiles/filesystem_core.dir/src/extent.cpp.o -c /home/fs/CLionProjects/filesystem/src/extent.cpp
 
 CMakeFiles/filesystem_core.dir/src/extent.cpp.i: cmake_force
@@ -158,6 +172,7 @@ filesystem_core_OBJECTS = \
 "CMakeFiles/filesystem_core.dir/src/async_io.cpp.o" \
 "CMakeFiles/filesystem_core.dir/src/block_device.cpp.o" \
 "CMakeFiles/filesystem_core.dir/src/disk_format.cpp.o" \
+"CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o" \
 "CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o" \
 "CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o" \
 "CMakeFiles/filesystem_core.dir/src/extent.cpp.o"
@@ -168,12 +183,13 @@ filesystem_core_EXTERNAL_OBJECTS =
 libfilesystem_core.a: CMakeFiles/filesystem_core.dir/src/async_io.cpp.o
 libfilesystem_core.a: CMakeFiles/filesystem_core.dir/src/block_device.cpp.o
 libfilesystem_core.a: CMakeFiles/filesystem_core.dir/src/disk_format.cpp.o
+libfilesystem_core.a: CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o
 libfilesystem_core.a: CMakeFiles/filesystem_core.dir/src/bitmap.cpp.o
 libfilesystem_core.a: CMakeFiles/filesystem_core.dir/src/buffer_pool.cpp.o
 libfilesystem_core.a: CMakeFiles/filesystem_core.dir/src/extent.cpp.o
 libfilesystem_core.a: CMakeFiles/filesystem_core.dir/build.make
 libfilesystem_core.a: CMakeFiles/filesystem_core.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/fs/CLionProjects/filesystem/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX static library libfilesystem_core.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/fs/CLionProjects/filesystem/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Linking CXX static library libfilesystem_core.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/filesystem_core.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/filesystem_core.dir/link.txt --verbose=$(VERBOSE)
 

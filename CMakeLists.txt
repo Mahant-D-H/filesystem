@@ -16,6 +16,7 @@ add_library(filesystem_core
     src/async_io.cpp
     src/block_device.cpp
     src/disk_format.cpp
+    src/layout_engine.cpp
     src/bitmap.cpp
     src/buffer_pool.cpp
     src/extent.cpp
@@ -53,3 +54,7 @@ target_compile_options(filesystem-buffer-pool-demo PRIVATE -Wall -Wextra -Wpedan
 add_executable(filesystem-metadata-demo demo/metadata_demo.cpp)
 target_link_libraries(filesystem-metadata-demo PRIVATE filesystem_core)
 target_compile_options(filesystem-metadata-demo PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(filesystem-layout-demo demo/layout_demo.cpp)
+target_link_libraries(filesystem-layout-demo PRIVATE filesystem_core)
+target_compile_options(filesystem-layout-demo PRIVATE -Wall -Wextra -Wpedantic)

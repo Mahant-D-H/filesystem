@@ -11,6 +11,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/filesystem_core.dir/src/disk_format.cpp.o.d"
   "CMakeFiles/filesystem_core.dir/src/extent.cpp.o"
   "CMakeFiles/filesystem_core.dir/src/extent.cpp.o.d"
+  "CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o"
+  "CMakeFiles/filesystem_core.dir/src/layout_engine.cpp.o.d"
   "libfilesystem_core.a"
   "libfilesystem_core.pdb"
 )
