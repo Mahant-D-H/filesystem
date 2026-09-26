@@ -17,9 +17,13 @@ int main() {
         fs::InodeDisk inode {};
         inode.inode_number = 1;
         inode.file_type = static_cast<uint8_t>(fs::FileType::Regular);
+        const uint64_t checkpoint_before_allocation = fs::read_superblock(device).last_checkpoint_lsn;
         const auto allocated = fs::allocate_inode_extents(device, superblock, inode, 5);
         if (allocated.size() != 1 || allocated[0].length != 5) {
             throw runtime_error("allocation did not return a five-block extent");
+        }
+        if (fs::read_superblock(device).last_checkpoint_lsn <= checkpoint_before_allocation) {
+            throw runtime_error("extent allocation metadata bypassed WAL checkpointing");
         }
 
         const auto persisted_inode = fs::read_inode(device, superblock, 1);

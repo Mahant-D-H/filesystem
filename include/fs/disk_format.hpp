@@ -13,7 +13,7 @@ using namespace std;
 namespace fs {
 
 inline constexpr uint32_t kBlockSize = 4 * 1024; // BlockSize = 4KB
-inline constexpr uint32_t kFormatVersion = 2;
+inline constexpr uint32_t kFormatVersion = 3;
 inline constexpr uint64_t kSuperblockMagic = 0x315359534653ULL;
 inline constexpr uint32_t kInodeSize = 256;
 inline constexpr uint32_t kDefaultInodesPer16KiB = 1;
@@ -37,12 +37,17 @@ struct SuperblockDisk {
     uint64_t data_bitmap_blocks;
     uint64_t inode_table_start;
     uint64_t inode_table_blocks;
+    uint64_t wal_start;
+    uint64_t wal_blocks;
+    uint64_t double_write_start;
+    uint64_t double_write_blocks;
     uint64_t data_start;
     uint64_t data_blocks;
     uint64_t root_inode;
     uint64_t mount_count;
     uint8_t clean_shutdown;
     uint8_t reserved[7];
+    uint64_t last_checkpoint_lsn;
     char uuid[16];
     uint64_t checksum;
 };
@@ -83,6 +88,10 @@ struct Layout {
     uint64_t data_bitmap_blocks;
     uint64_t inode_table_start;
     uint64_t inode_table_blocks;
+    uint64_t wal_start;
+    uint64_t wal_blocks;
+    uint64_t double_write_start;
+    uint64_t double_write_blocks;
     uint64_t data_start;
     uint64_t data_blocks;
 };
@@ -105,15 +114,12 @@ void write_inode(BlockDevice& device, const SuperblockDisk& superblock, const In
 vector<ExtentDisk> read_inode_extents(const BlockDevice& device, const SuperblockDisk& superblock, const InodeDisk& inode);
 void write_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, const vector<ExtentDisk>& extents);
 vector<ExtentDisk> allocate_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, uint64_t block_count);
-vector<ExtentDisk> allocate_inode_extents_aligned(BlockDevice& device, const SuperblockDisk& superblock,
-                                                  InodeDisk& inode, uint64_t block_count,
-                                                  uint64_t alignment_blocks);
+vector<ExtentDisk> allocate_inode_extents_aligned(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode, uint64_t block_count, uint64_t alignment_blocks);
 bool release_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode);
 
 Bitmap read_inode_bitmap(const BlockDevice& device, const SuperblockDisk& superblock);
 void write_inode_bitmap(BlockDevice& device, const SuperblockDisk& superblock, const Bitmap& bitmap);
-InodeDisk allocate_inode(BlockDevice& device, const SuperblockDisk& superblock, FileType type,
-                         uint32_t mode = 0644);
+InodeDisk allocate_inode(BlockDevice& device, const SuperblockDisk& superblock, FileType type, uint32_t mode = 0644);
 void release_inode(BlockDevice& device, const SuperblockDisk& superblock, InodeDisk& inode);
 
 Bitmap read_data_bitmap(const BlockDevice& device, const SuperblockDisk& superblock);

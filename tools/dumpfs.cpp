@@ -23,10 +23,13 @@ int main(int argc, char* argv[]) {
              << "inode bitmap:       " << superblock.inode_bitmap_start << " (" << superblock.inode_bitmap_blocks << " blocks)\n"
              << "data bitmap:        " << superblock.data_bitmap_start << " (" << superblock.data_bitmap_blocks << " blocks)\n"
              << "inode table:        " << superblock.inode_table_start << " (" << superblock.inode_table_blocks << " blocks)\n"
+             << "write-ahead log:    " << superblock.wal_start << " (" << superblock.wal_blocks << " blocks)\n"
+             << "double-write zone:  " << superblock.double_write_start << " (" << superblock.double_write_blocks << " blocks)\n"
              << "data region:        " << superblock.data_start << " (" << superblock.data_blocks << " blocks)\n"
              << "root inode:         " << superblock.root_inode << '\n'
              << "mount count:        " << superblock.mount_count << '\n'
              << "clean shutdown:     " << (superblock.clean_shutdown ? "yes" : "no") << '\n'
+             << "checkpoint LSN:     " << superblock.last_checkpoint_lsn << '\n'
              << "uuid:               " << fs::uuid_string(superblock.uuid) << '\n';
         return EXIT_SUCCESS;
     } catch (const exception& error) {

@@ -19,6 +19,7 @@ add_library(filesystem_core
     src/layout_engine.cpp
     src/bitmap.cpp
     src/buffer_pool.cpp
+    src/crash_consistency.cpp
     src/extent.cpp
 )
 
@@ -38,8 +39,7 @@ add_executable(filesystem-dumpfs tools/dumpfs.cpp)
 target_link_libraries(filesystem-dumpfs PRIVATE filesystem_core)
 target_compile_options(filesystem-dumpfs PRIVATE -Wall -Wextra -Wpedantic)
 
-add_executable(filesystem-async-io-demo demo/async_io_demo.cpp
-)
+add_executable(filesystem-async-io-demo demo/async_io_demo.cpp)
 target_link_libraries(filesystem-async-io-demo PRIVATE filesystem_core)
 target_compile_options(filesystem-async-io-demo PRIVATE -Wall -Wextra -Wpedantic)
 
@@ -58,3 +58,7 @@ target_compile_options(filesystem-metadata-demo PRIVATE -Wall -Wextra -Wpedantic
 add_executable(filesystem-layout-demo demo/layout_demo.cpp)
 target_link_libraries(filesystem-layout-demo PRIVATE filesystem_core)
 target_compile_options(filesystem-layout-demo PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(filesystem-crash-consistency-demo demo/crash_consistency_demo.cpp)
+target_link_libraries(filesystem-crash-consistency-demo PRIVATE filesystem_core)
+target_compile_options(filesystem-crash-consistency-demo PRIVATE -Wall -Wextra -Wpedantic)

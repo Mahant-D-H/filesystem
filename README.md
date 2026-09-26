@@ -117,7 +117,11 @@ Physical power loss mid-write causes corrupted inodes or orphan block allocation
 2. Play forward uncommitted valid transactions from the log (Redo phase).
 3. Reclaim allocated extents that lack corresponding valid inode pointers (Undo phase).
 
+### Current Implementation
 
+Format version 3 reserves mirrored superblocks at LBA 0 and 1, a 16-block WAL, and an 8-block double-write zone. The single-writer WAL records checksummed 4 KiB page images and commit records; a transaction may update up to seven distinct blocks. Inode-table and allocation-bitmap changes use this path, as do fixed-page and dense-array writes. Append-only payload data is flushed before its inode size is committed.
+
+Mount recovery replays only complete committed WAL transactions, checkpoints their LSN, then reconstructs inode and data allocation maps from valid inode extent references to reclaim orphaned allocations. Recovery is idempotent. The fixed WAL capacity and single-writer model are intentional limits until the concurrency work in Phase 6.
 
 ---
 

@@ -1,5 +1,7 @@
 #include "fs/layout_engine.hpp"
+#include "fs/crash_consistency.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <limits>
 #include <stdexcept>
@@ -37,6 +39,27 @@ uint64_t checked_multiply(uint64_t left, uint64_t right, const char* message) {
 void set_modified_time(InodeDisk& inode) {
     inode.mtime = chrono::system_clock::to_time_t(chrono::system_clock::now());
     inode.ctime = inode.mtime;
+}
+
+void write_transactional(BlockDevice& device, uint64_t offset, span<const byte> data) {
+    if (offset % kBlockSize != 0 || data.empty() || data.size() % kBlockSize != 0) {
+        throw invalid_argument("transactional writes must be non-empty 4 KiB multiples");
+    }
+    auto consistency = CrashConsistency::open_for_update(device);
+    const uint64_t max_updates = min<uint64_t>(
+        (consistency.superblock().wal_blocks - 2) / 2,
+        consistency.superblock().double_write_blocks);
+    const uint64_t first_block = offset / kBlockSize;
+    const uint64_t block_count = data.size() / kBlockSize;
+    for (uint64_t first = 0; first < block_count; first += max_updates) {
+        auto transaction = consistency.begin();
+        const uint64_t count = min(max_updates, block_count - first);
+        for (uint64_t index = 0; index < count; ++index) {
+            transaction.write_block(first_block + first + index,
+                                    data.subspan((first + index) * kBlockSize, kBlockSize));
+        }
+        transaction.commit();
+    }
 }
 
 } // namespace
@@ -99,7 +122,7 @@ void FixedPageLayout::write_page(uint64_t page_id, span<const byte> buffer) {
     if (buffer.size() != page_size_) {
         throw invalid_argument("fixed-page write buffer has the wrong size");
     }
-    device_.write_at(page_offset(page_id), buffer);
+    write_transactional(device_, page_offset(page_id), buffer);
     set_modified_time(inode_);
     write_inode(device_, superblock_, inode_);
 }
@@ -149,6 +172,7 @@ uint64_t AppendOnlySegment::append(span<const byte> data) {
     const ExtentDisk extent = single_extent(device_, superblock_, inode_);
     const uint64_t offset = inode_.size;
     device_.write_at(extent.start * kBlockSize + offset, data);
+    device_.flush();
     inode_.size += data.size();
     set_modified_time(inode_);
     write_inode(device_, superblock_, inode_);
@@ -207,7 +231,7 @@ void DenseArrayLayout::write_at(uint64_t offset, span<const byte> buffer) {
         throw invalid_argument("dense-array writes must be in-bounds 4 KiB multiples");
     }
     const ExtentDisk extent = single_extent(device_, superblock_, inode_);
-    device_.write_at(extent.start * kBlockSize + offset, buffer);
+    write_transactional(device_, extent.start * kBlockSize + offset, buffer);
     set_modified_time(inode_);
     write_inode(device_, superblock_, inode_);
 }

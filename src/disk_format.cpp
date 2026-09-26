@@ -1,5 +1,6 @@
 #include "fs/disk_format.hpp"
 #include "fs/bitmap.hpp"
+#include "fs/crash_consistency.hpp"
 
 #include <algorithm>
 #include <array>
@@ -32,10 +33,13 @@ void write_inode_table_entry(BlockDevice& device, const SuperblockDisk& superblo
     const uint64_t inode_offset = inode_index * kInodeSize;
     const uint64_t block_index = superblock.inode_table_start + (inode_offset / kBlockSize);
     const uint64_t block_offset = inode_offset % kBlockSize;
+    auto consistency = CrashConsistency::open_for_update(device);
     array<byte, kBlockSize> block {};
     device.read_at(block_index * kBlockSize, block);
     memcpy(block.data() + block_offset, &inode, sizeof(inode));
-    device.write_at(block_index * kBlockSize, block);
+    auto transaction = consistency.begin();
+    transaction.write_block(block_index, block);
+    transaction.commit();
 }
 
 void read_inode_table_entry(const BlockDevice& device, const SuperblockDisk& superblock, uint64_t inode_index, InodeDisk& inode) {
@@ -114,16 +118,50 @@ void write_bitmap_blocks(BlockDevice& device, uint64_t start_block, uint64_t blo
         throw invalid_argument("bitmap does not fit its on-disk allocation");
     }
     copy(bitmap_bytes.begin(), bitmap_bytes.end(), raw.begin());
+    if (raw.empty()) {
+        return;
+    }
+    auto consistency = CrashConsistency::open_for_update(device);
+    const uint64_t max_updates = min<uint64_t>(
+        (consistency.superblock().wal_blocks - 2) / 2,
+        consistency.superblock().double_write_blocks);
+    for (uint64_t first = 0; first < block_count; first += max_updates) {
+        auto transaction = consistency.begin();
+        const uint64_t count = min(max_updates, block_count - first);
+        for (uint64_t index = 0; index < count; ++index) {
+            const auto block = span<const byte>(raw.data() + (first + index) * kBlockSize, kBlockSize);
+            transaction.write_block(start_block + first + index, block);
+        }
+        transaction.commit();
+    }
+}
+
+void write_bitmap_blocks_unjournaled(BlockDevice& device, uint64_t start_block, uint64_t block_count,
+                                     span<const byte> bitmap_bytes) {
+    vector<byte> raw(block_count * kBlockSize, byte{});
+    if (bitmap_bytes.size() > raw.size()) {
+        throw invalid_argument("bitmap does not fit its on-disk allocation");
+    }
+    copy(bitmap_bytes.begin(), bitmap_bytes.end(), raw.begin());
     if (!raw.empty()) {
         device.write_at(start_block * kBlockSize, raw);
+    }
+}
+
+bool valid_superblock_copy(const SuperblockDisk& superblock, uint64_t image_size) {
+    try {
+        validate_superblock(superblock, image_size);
+        return true;
+    } catch (const runtime_error&) {
+        return false;
     }
 }
 
 } // namespace end
 
 Layout calculate_layout(uint64_t image_size) {
-    if (image_size < 16 * kBlockSize) {
-        throw invalid_argument("image must be at least 64 KiB");
+    if (image_size < 32 * kBlockSize) {
+        throw invalid_argument("image must be at least 128 KiB");
     }
     if (image_size % kBlockSize != 0) {
         throw invalid_argument("image size must be a multiple of 4 KiB");
@@ -135,11 +173,18 @@ Layout calculate_layout(uint64_t image_size) {
         ceil_div(total_inodes, kBlockSize * 8);
     const uint64_t inode_table_blocks =
         ceil_div(total_inodes * kInodeSize, kBlockSize);
-    const uint64_t data_bitmap_start = 1 + inode_bitmap_blocks;
+    constexpr uint64_t inode_bitmap_start = 2;
+    const uint64_t data_bitmap_start = inode_bitmap_start + inode_bitmap_blocks;
     const uint64_t data_bitmap_blocks =
         ceil_div(total_blocks, kBlockSize * 8);
     const uint64_t inode_table_start = data_bitmap_start + data_bitmap_blocks;
-    const uint64_t data_start = inode_table_start + inode_table_blocks;
+    // These fixed regions are deliberately outside the allocatable data area.
+    // Keeping them contiguous makes their recovery I/O predictable.
+    constexpr uint64_t wal_blocks = 16;
+    constexpr uint64_t double_write_blocks = 8;
+    const uint64_t wal_start = inode_table_start + inode_table_blocks;
+    const uint64_t double_write_start = wal_start + wal_blocks;
+    const uint64_t data_start = double_write_start + double_write_blocks;
 
     if (data_start >= total_blocks) {
         throw invalid_argument("image is too small for filesystem metadata");
@@ -147,12 +192,16 @@ Layout calculate_layout(uint64_t image_size) {
     return {
         total_blocks,
         total_inodes,
-        1,
+        inode_bitmap_start,
         inode_bitmap_blocks,
         data_bitmap_start,
         data_bitmap_blocks,
         inode_table_start,
         inode_table_blocks,
+        wal_start,
+        wal_blocks,
+        double_write_start,
+        double_write_blocks,
         data_start,
         total_blocks - data_start
     };
@@ -164,16 +213,38 @@ void write_superblock(BlockDevice& device, const SuperblockDisk& input) {
     superblock.checksum = checksum(superblock);
     array<byte, kBlockSize> block {};
     memcpy(block.data(), &superblock, sizeof(superblock));
+    device.write_at(kBlockSize, block);
+    device.flush();
     device.write_at(0, block);
 }
 
 SuperblockDisk read_superblock(BlockDevice& device) {
-    array<byte, kBlockSize> block {};
-    device.read_at(0, block);
-    SuperblockDisk superblock {};
-    memcpy(&superblock, block.data(), sizeof(superblock));
-    validate_superblock(superblock, device.size());
-    return superblock;
+    array<byte, kBlockSize> primary_block {};
+    array<byte, kBlockSize> backup_block {};
+    device.read_at(0, primary_block);
+    device.read_at(kBlockSize, backup_block);
+    SuperblockDisk primary {};
+    SuperblockDisk backup {};
+    memcpy(&primary, primary_block.data(), sizeof(primary));
+    memcpy(&backup, backup_block.data(), sizeof(backup));
+    const bool primary_valid = valid_superblock_copy(primary, device.size());
+    const bool backup_valid = valid_superblock_copy(backup, device.size());
+    if (!primary_valid && !backup_valid) {
+        throw runtime_error("no valid filesystem superblock copy");
+    }
+    if (!primary_valid) {
+        return backup;
+    }
+    if (!backup_valid) {
+        return primary;
+    }
+    if (backup.last_checkpoint_lsn != primary.last_checkpoint_lsn) {
+        return backup.last_checkpoint_lsn > primary.last_checkpoint_lsn ? backup : primary;
+    }
+    if (backup.clean_shutdown != primary.clean_shutdown) {
+        return backup.clean_shutdown == 0 ? backup : primary;
+    }
+    return primary;
 }
 
 void validate_superblock(const SuperblockDisk& superblock, uint64_t image_size) {
@@ -189,13 +260,17 @@ void validate_superblock(const SuperblockDisk& superblock, uint64_t image_size) 
     if (image_size % kBlockSize != 0 ||
         superblock.total_blocks != image_size / kBlockSize ||
         superblock.total_blocks == 0 ||
-        superblock.inode_bitmap_start != 1 ||
+        superblock.inode_bitmap_start != 2 ||
         superblock.inode_bitmap_blocks == 0 ||
         superblock.data_bitmap_start != superblock.inode_bitmap_start + superblock.inode_bitmap_blocks ||
         superblock.data_bitmap_blocks == 0 ||
         superblock.inode_table_start != superblock.data_bitmap_start + superblock.data_bitmap_blocks ||
         superblock.inode_table_blocks == 0 ||
-        superblock.data_start != superblock.inode_table_start + superblock.inode_table_blocks ||
+        superblock.wal_start != superblock.inode_table_start + superblock.inode_table_blocks ||
+        superblock.wal_blocks < 4 ||
+        superblock.double_write_start != superblock.wal_start + superblock.wal_blocks ||
+        superblock.double_write_blocks == 0 ||
+        superblock.data_start != superblock.double_write_start + superblock.double_write_blocks ||
         superblock.data_start >= superblock.total_blocks ||
         superblock.data_blocks != superblock.total_blocks - superblock.data_start ||
         superblock.total_inodes == 0 ||
@@ -384,7 +459,10 @@ void write_inode_extents(BlockDevice& device, const SuperblockDisk& superblock, 
         }
         array<byte, kBlockSize> block {};
         memcpy(block.data(), &table, sizeof(table));
-        device.write_at(inode.single_indirect_block * kBlockSize, block);
+        auto consistency = CrashConsistency::open_for_update(device);
+        auto transaction = consistency.begin();
+        transaction.write_block(inode.single_indirect_block, block);
+        transaction.commit();
         write_data_bitmap(device, superblock, bitmap);
     } else if (old_indirect_block >= superblock.data_start &&
                old_indirect_block - superblock.data_start < superblock.data_blocks) {
@@ -480,6 +558,10 @@ void format_image(BlockDevice& device) {
     superblock.data_bitmap_blocks = layout.data_bitmap_blocks;
     superblock.inode_table_start = layout.inode_table_start;
     superblock.inode_table_blocks = layout.inode_table_blocks;
+    superblock.wal_start = layout.wal_start;
+    superblock.wal_blocks = layout.wal_blocks;
+    superblock.double_write_start = layout.double_write_start;
+    superblock.double_write_blocks = layout.double_write_blocks;
     superblock.data_start = layout.data_start;
     superblock.data_blocks = layout.data_blocks;
     superblock.root_inode = 0;
@@ -494,13 +576,13 @@ void format_image(BlockDevice& device) {
 
     Bitmap inode_bitmap(layout.total_inodes);
     inode_bitmap.set(0, true);
-    write_bitmap_blocks(device, layout.inode_bitmap_start, layout.inode_bitmap_blocks,
-                        inode_bitmap.bytes());
+    write_bitmap_blocks_unjournaled(device, layout.inode_bitmap_start, layout.inode_bitmap_blocks,
+                                    inode_bitmap.bytes());
 
     Bitmap data_bitmap(layout.data_blocks);
     data_bitmap.set(0, true); // Reserve the first data block for the root directory.
-    write_bitmap_blocks(device, layout.data_bitmap_start, layout.data_bitmap_blocks,
-                        data_bitmap.bytes());
+    write_bitmap_blocks_unjournaled(device, layout.data_bitmap_start, layout.data_bitmap_blocks,
+                                    data_bitmap.bytes());
 
     InodeDisk root {};
     root.inode_number = 0;

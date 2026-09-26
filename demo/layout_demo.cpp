@@ -11,7 +11,7 @@
 using namespace std;
 
 int main() {
-    constexpr const char* image_path = "/tmp/layout-demo.img";
+    constexpr const char* image_path = "/tmp/demo.img";
     remove(image_path);
     try {
         auto device = fs::BlockDevice::create(image_path, 16 * 1024 * 1024);
@@ -19,8 +19,13 @@ int main() {
         const auto superblock = fs::read_superblock(device);
 
         auto pages = fs::FixedPageLayout::create(device, superblock, 3, 8 * 1024);
+        const uint64_t checkpoint_before_page_write = fs::read_superblock(device).last_checkpoint_lsn;
         vector<byte> page(8 * 1024, byte{0x2a});
         pages.write_page(2, page);
+        const uint64_t checkpoint_after_page_write = fs::read_superblock(device).last_checkpoint_lsn;
+        if (checkpoint_after_page_write < checkpoint_before_page_write + 2) {
+            throw runtime_error("fixed-page updates did not pass through WAL checkpointing");
+        }
         vector<byte> page_readback(page.size());
         pages.read_page(2, page_readback);
         if (page_readback != page) {
