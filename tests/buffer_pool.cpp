@@ -9,7 +9,7 @@
 using namespace std;
 
 int main() {
-    constexpr const char* image_path = "/tmp/demo.img";
+    constexpr const char* image_path = "/tmp/test.img";
     remove(image_path);
     try {
         auto device = fs::BlockDevice::create(image_path, 8 * fs::kBlockSize);
@@ -49,16 +49,38 @@ int main() {
 
         array<byte, fs::kBlockSize> readback{};
         device.read_at(0, readback);
-        remove(image_path);
         if (memcmp(readback.data(), "buffer-pool", 11) != 0) {
-            cerr << "buffer pool demo: dirty page was not persisted\n";
-            return EXIT_FAILURE;
+            throw runtime_error("dirty page was not persisted");
         }
-        cout << "buffer pool demo: 2Q scan resistance and dirty flush verified\n";
+
+        fs::BufferPool small_pool(device, 2);
+        auto first_pin = small_pool.fetch(1);
+        auto second_pin = small_pool.fetch(2);
+        bool pinned_pool_rejected_fetch = false;
+        try {
+            auto unavailable = small_pool.fetch(3);
+            (void)unavailable;
+        } catch (const runtime_error&) {
+            pinned_pool_rejected_fetch = true;
+        }
+        if (!pinned_pool_rejected_fetch) {
+            throw runtime_error("pool evicted a page while every frame was pinned");
+        }
+        first_pin = fs::PageGuard{};
+        auto reused_frame = small_pool.fetch(3);
+        if (!reused_frame || reused_frame.block_number() != 3) {
+            throw runtime_error("pool did not reuse a frame after its guard was released");
+        }
+        reused_frame = fs::PageGuard{};
+        second_pin = fs::PageGuard{};
+        small_pool.flush_all();
+
+        remove(image_path);
+        cout << "buffer pool test success: 2Q scan resistance and dirty flush verified\n";
         return EXIT_SUCCESS;
     } catch (const exception& error) {
         remove(image_path);
-        cerr << "buffer pool demo: " << error.what() << '\n';
+        cerr << "buffer pool test: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

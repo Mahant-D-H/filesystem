@@ -14,7 +14,7 @@
 using namespace std;
 
 int main() {
-    const string image_path = "/tmp/demo.img";
+    const string image_path = "/tmp/test.img";
     remove(image_path.c_str());
 
     constexpr size_t kBlockSize = 4 * 1024;
@@ -25,11 +25,11 @@ int main() {
 
     const int fd = ::open(image_path.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_DIRECT | O_SYNC, 0644);
     if (fd < 0) {
-        cerr << "demo: failed to create test image\n";
+        cerr << "failed to create test image\n";
         return EXIT_FAILURE;
     }
     if (ftruncate(fd, static_cast<off_t>(kBlockSize * 2)) != 0) {
-        cerr << "demo: failed to size test image\n";
+        cerr << "failed to size test image\n";
         ::close(fd);
         return EXIT_FAILURE;
     }
@@ -48,7 +48,7 @@ int main() {
         fs::AsyncIo::free_aligned_buffer(raw_write);
         fs::AsyncIo::free_aligned_buffer(raw_read);
         ::close(fd);
-        cerr << "demo: async write failed\n";
+        cerr << "async write failed\n";
         return EXIT_FAILURE;
     }
     cout << "Write successful\n";
@@ -60,7 +60,7 @@ int main() {
         fs::AsyncIo::free_aligned_buffer(raw_write);
         fs::AsyncIo::free_aligned_buffer(raw_read);
         ::close(fd);
-        cerr << "demo: async read failed\n";
+        cerr << "async read failed\n";
         return EXIT_FAILURE;
     }
     cout << static_cast<char*>(raw_read) << '\n';
@@ -71,10 +71,10 @@ int main() {
     ::close(fd);
 
     if (!matches) {
-        cerr << "demo: async read/write verification failed\n";
+        cerr << "async read/write verification failed\n";
         return EXIT_FAILURE;
     }
 
-    cout << "async I/O demo: verified 4 KiB aligned read/write via io_uring\n";
+    cout << "async I/O test success: verified 4 KiB aligned read/write via io_uring\n";
     return EXIT_SUCCESS;
 }

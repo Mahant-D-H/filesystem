@@ -52,13 +52,15 @@ bool ExtentAllocator::release(uint64_t start, uint64_t length) {
     if (start >= total_blocks_ || length == 0) {
         return false;
     }
-    if (start + length > total_blocks_) {
+    if (length > total_blocks_ - start) {
         return false;
     }
     for (uint64_t i = start; i < start + length; ++i) {
         if (!used_.get(i)) {
             return false;
         }
+    }
+    for (uint64_t i = start; i < start + length; ++i) {
         used_.set(i, false);
     }
     free_blocks_ += length;
@@ -69,7 +71,7 @@ bool ExtentAllocator::is_allocated(uint64_t start, uint64_t length) const {
     if (start >= total_blocks_ || length == 0) {
         return false;
     }
-    if (start + length > total_blocks_) {
+    if (length > total_blocks_ - start) {
         throw out_of_range("extent exceeds allocator bounds");
     }
     for (uint64_t i = start; i < start + length; ++i) {

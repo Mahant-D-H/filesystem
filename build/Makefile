@@ -169,7 +169,7 @@ filesystem-dumpfs/fast:
 .PHONY : filesystem-dumpfs/fast
 
 #=============================================================================
-# Target rules for targets named filesystem-async-io-demo
+# Target rules for targets named filesystem-async-io-tests
 
 # Build rule for target.
 filesystem-async-io-demo: cmake_check_build_system
@@ -182,7 +182,7 @@ filesystem-async-io-demo/fast:
 .PHONY : filesystem-async-io-demo/fast
 
 #=============================================================================
-# Target rules for targets named filesystem-extent-demo
+# Target rules for targets named filesystem-extent-tests
 
 # Build rule for target.
 filesystem-extent-demo: cmake_check_build_system
@@ -195,7 +195,7 @@ filesystem-extent-demo/fast:
 .PHONY : filesystem-extent-demo/fast
 
 #=============================================================================
-# Target rules for targets named filesystem-buffer-pool-demo
+# Target rules for targets named filesystem-buffer-pool-tests
 
 # Build rule for target.
 filesystem-buffer-pool-demo: cmake_check_build_system
@@ -208,7 +208,7 @@ filesystem-buffer-pool-demo/fast:
 .PHONY : filesystem-buffer-pool-demo/fast
 
 #=============================================================================
-# Target rules for targets named filesystem-metadata-demo
+# Target rules for targets named filesystem-metadata-tests
 
 # Build rule for target.
 filesystem-metadata-demo: cmake_check_build_system
@@ -221,7 +221,7 @@ filesystem-metadata-demo/fast:
 .PHONY : filesystem-metadata-demo/fast
 
 #=============================================================================
-# Target rules for targets named filesystem-layout-demo
+# Target rules for targets named filesystem-layout-tests
 
 # Build rule for target.
 filesystem-layout-demo: cmake_check_build_system

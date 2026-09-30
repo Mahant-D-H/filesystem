@@ -11,7 +11,7 @@
 using namespace std;
 
 int main() {
-    constexpr const char* image_path = "/tmp/demo.img";
+    constexpr const char* image_path = "/tmp/test.img";
     remove(image_path);
     try {
         auto device = fs::BlockDevice::create(image_path, 16 * 1024 * 1024);
@@ -62,12 +62,35 @@ int main() {
             throw runtime_error("reopened dense-array readback mismatch");
         }
 
+        const auto expect_failure = [](auto&& operation) {
+            try {
+                operation();
+            } catch (const exception&) {
+                return;
+            }
+            throw runtime_error("invalid layout operation unexpectedly succeeded");
+        };
+        expect_failure([&] { fs::FixedPageLayout::create(device, superblock, 0); });
+        expect_failure([&] { fs::FixedPageLayout::create(device, superblock, 1, fs::kBlockSize - 1); });
+        expect_failure([&] { pages.read_page(pages.page_count(), page_readback); });
+        expect_failure([&] { pages.write_page(pages.page_count(), page); });
+        vector<byte> short_page(page.size() - 1);
+        expect_failure([&] { pages.read_page(0, short_page); });
+
+        vector<byte> oversized_append(5 * fs::kBlockSize);
+        expect_failure([&] { segment.append(oversized_append); });
+        expect_failure([&] { segment.append(span<const byte>(record.data(), record.size() - 1)); });
+
+        expect_failure([&] { dense.read_at(1, vector_readback); });
+        expect_failure([&] { dense.write_at(dense.capacity(), vector_block); });
+        expect_failure([&] { fs::DenseArrayLayout::create(device, superblock, fs::kBlockSize); });
+
         remove(image_path);
-        cout << "layout demo: fixed-page, append-only, and huge-page-aligned dense layouts verified\n";
+        cout << "layout tests passed: fixed-page, append-only, dense layouts, and invalid geometry/bounds\n";
         return EXIT_SUCCESS;
     } catch (const exception& error) {
         remove(image_path);
-        cerr << "layout demo: " << error.what() << '\n';
+        cerr << "error: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

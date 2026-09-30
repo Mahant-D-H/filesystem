@@ -7,7 +7,7 @@
 using namespace std;
 
 int main() {
-    constexpr const char* image_path = "/tmp/demo.img";
+    constexpr const char* image_path = "/tmp/test.img";
     remove(image_path);
     try {
         auto device = fs::BlockDevice::create(image_path, 1024 * 1024);
@@ -61,11 +61,11 @@ int main() {
             throw runtime_error("indirect extent table block remains allocated");
         }
         remove(image_path);
-        cout << "metadata demo: direct and indirect persisted extent allocation/release verified\n";
+        cout << "metadata test success: direct and indirect persisted extent allocation/release verified\n";
         return EXIT_SUCCESS;
     } catch (const exception& error) {
         remove(image_path);
-        cerr << "metadata demo: " << error.what() << '\n';
+        cerr << "error: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

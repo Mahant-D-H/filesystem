@@ -10,7 +10,7 @@
 using namespace std;
 
 int main() {
-    constexpr const char* image_path = "/tmp/demo.img";
+    constexpr const char* image_path = "/tmp/test.img";
     remove(image_path);
     try {
         auto device = fs::BlockDevice::create(image_path, 2 * 1024 * 1024);
@@ -140,11 +140,11 @@ int main() {
         }
         fs::write_superblock(device, primary_recovered);
         remove(image_path);
-        cout << "crash consistency demo: WAL transactions, double-write staging, orphan reclamation, and recovery verified\n";
+        cout << "crash consistency test success: WAL transactions, double-write staging, orphan reclamation, and recovery verified\n";
         return EXIT_SUCCESS;
     } catch (const exception& error) {
         remove(image_path);
-        cerr << "crash consistency demo: " << error.what() << '\n';
+        cerr << "crash consistency error: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

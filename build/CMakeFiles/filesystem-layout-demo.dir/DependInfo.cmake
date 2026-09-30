@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/fs/CLionProjects/filesystem/demo/layout_demo.cpp" "CMakeFiles/filesystem-layout-demo.dir/demo/layout_demo.cpp.o" "gcc" "CMakeFiles/filesystem-layout-demo.dir/demo/layout_demo.cpp.o.d"
+  "/home/fs/CLionProjects/filesystem/tests/layout_demo.cpp" "CMakeFiles/filesystem-layout-tests.dir/tests/layout_demo.cpp.o" "gcc" "CMakeFiles/filesystem-layout-tests.dir/tests/layout_demo.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/fs/CLionProjects/filesystem/demo/metadata_demo.cpp" "CMakeFiles/filesystem-metadata-demo.dir/demo/metadata_demo.cpp.o" "gcc" "CMakeFiles/filesystem-metadata-demo.dir/demo/metadata_demo.cpp.o.d"
+  "/home/fs/CLionProjects/filesystem/tests/metadata_demo.cpp" "CMakeFiles/filesystem-metadata-tests.dir/tests/metadata_demo.cpp.o" "gcc" "CMakeFiles/filesystem-metadata-tests.dir/tests/metadata_demo.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

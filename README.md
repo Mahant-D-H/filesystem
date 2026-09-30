@@ -1,136 +1,343 @@
-Building a database-optimized filesystem requires abandoning traditional general-purpose POSIX abstractions (like kernel page-caching, indirect block structures, and standard POSIX locks) in favor of direct block-device control, zero-copy asynchronous I/O, and specialized layout engines.
+# Database-Oriented Filesystem
 
----
+A Linux storage-layer prototype for database workloads. Instead of presenting a
+general-purpose POSIX filesystem, it exposes fixed-size blocks, extents, and
+database-oriented storage layouts directly to C++ callers.
 
-## Phase 1: Storage Device Subsystem & Asynchronous I/O
+The project explores how a filesystem can make storage behavior explicit:
+allocation geometry, alignment, page updates, write ordering, and recovery are
+part of the storage API rather than hidden behind ordinary files. It currently
+operates on a regular file used as a disk image; it is **not** a kernel
+filesystem and does not mount or implement POSIX paths and file operations.
 
-Standard filesystems rely on the OS page cache, causing double-buffering when a database manages its own cache pool. Your filesystem must interact directly with storage blocks without kernel cache intervention.
+> **Project status:** This is an educational and experimental C++20 project.
+> The block-device, metadata, storage-layout, and WAL components have executable
+> tests. The CPU-pinned worker pool is an early concurrency prototype, not a
+> production-ready parallel filesystem. Persistent allocation and WAL updates
+> remain single-writer.
 
-### Core Concepts
+## Why a database-oriented storage layer?
 
-* **Block Devices & Memory Alignment:** Modern NVMe drives read and write in physical sectors ($4096$ bytes). Buffers sent to the controller must be aligned to memory address boundaries divisible by the sector size ($4\text{KB}$ alignment via `posix_memalign` or `aligned_alloc`).
-* **Bypassing the Page Cache:** Open the storage block device or underlying raw image file using `O_DIRECT | O_SYNC` to bypass kernel caching and ensure writes reach physical media.
-* **Kernel-Bypass / Async I/O Engines:** Synchronous `pread`/`pwrite` calls block execution threads. Modern database storage layers use **`io_uring`** (Linux) to submit completion queues directly to the kernel without context switches.
+Databases commonly manage their own page caches and I/O policies. A conventional
+filesystem can add another caching and allocation layer between the database
+and storage, while its general-purpose file abstraction does not express
+workload-specific needs such as fixed-size random updates, sequential segment
+writes, or large aligned arrays.
 
-### Implementation Milestones
+This project instead provides a small set of explicit primitives:
 
-1. Build a `BlockDevice` class that opens a target device/file descriptor using `O_DIRECT`.
-2. Implement an asynchronous I/O driver wrapper using `io_uring` with ring submission/completion queues (`io_uring_queue_init`, `io_uring_submit`).
-3. Define the core address unit: $\text{Byte Offset} = \text{LBA} \times \text{Block Size}$, where $\text{LBA}$ is the Logical Block Address.
+- **4 KiB blocks** as the base on-disk and transactional unit.
+- **Contiguous extents** for allocating storage regions.
+- **Fixed-page, append-only, and dense-array layouts** for different access
+  patterns.
+- **Checksummed metadata and a write-ahead log (WAL)** for recoverable metadata
+  and page updates.
+- **An optional buffer pool and asynchronous I/O wrapper** for callers that
+  want to manage caching and I/O explicitly.
 
----
+These are building blocks for a database storage engine, not a replacement for
+an established filesystem or database engine.
 
-## Phase 2: Metadata Architecture, Extents, & Space Allocation
+## Architecture
 
-General-purpose filesystems allocate single blocks randomly, causing disk fragmentation. Databases require contiguous memory regions for high-throughput scans.
-
-### Core Concepts
-
-* **Extents vs. Blocks:** Instead of mapping individual $4\text{KB}$ blocks to files, allocate contiguous spans of blocks called **Extents** ($\text{Extent} = \{\text{Start LBA}, \text{Block Count}\}$).
-* **Superblock Layout:** Header stored at $\text{LBA}_0$ containing filesystem metadata: block size, total sectors, layout map offset, and magic identification bytes.
-* **Space Tracking Allocator:**
-* **Buddy Allocator:** Excellent for fast, fixed-size power-of-two allocation.
-* **Free Space Extent Tree (B+ Tree / Segment Tree):** Ideal for tracking contiguous free regions to fit large contiguous files (SSTables, vector index dumps).
-
-
-
-### Metadata Layout Structure
-
-| On-Disk Section | Offset / Location | Purpose |
-| --- | --- | --- |
-| **Superblock** | $\text{LBA}_0$ ($0$ – $4096$ bytes) | FS Version, total blocks, pointers to allocation maps |
-| **Allocation Map** | $\text{LBA}_1$ to $\text{LBA}_k$ | Extent free-lists or bitmap tracking free storage |
-| **Inode Table** | $\text{LBA}_{k+1}$ to $\text{LBA}_m$ | Data structure representing files, file sizes, and extent arrays |
-| **Data Region** | $\text{LBA}_{m+1}$ to $\text{End}$ | Contiguous physical block extents storing user/db data |
-
----
-
-## Phase 3: Buffer Pool & Custom Page Management
-
-Because `O_DIRECT` bypasses kernel memory, your filesystem must supply its own high-performance page frame buffer pool to cache metadata and hot data blocks in RAM.
-
-### Core Concepts
-
-* **Frame Buffers & Page Pinning:** Maintain a fixed pool of aligned $4\text{KB}$ memory frames in RAM. When a file system layer requests Page $N$, it locks ("pins") the buffer frame so an eviction thread does not write over active data.
-* **Eviction Policies for DB Workloads:** Standard Least Recently Used (LRU) fails under database table scans (which flush the entire cache). Use **2Q** or **CLOCK-Pro** eviction to differentiate between sequential scans and frequently accessed index pages.
-* **Dirty Page Flushing:** Maintain a dirty list with background async flush workers to commit modified pages back to the `io_uring` ring.
-
----
-
-## Phase 4: Database Workload-Specific Layout Engines
-
-Different database engines possess distinct I/O patterns. A high-performance storage engine provides multi-modal physical storage layouts based on access types:
-
-```
-                  ┌─────────────────────────────────────────┐
-                  │      Custom Filesystem Abstraction      │
-                  └────────────────────┬────────────────────┘
-                                       │
-        ┌──────────────────────────────┼──────────────────────────────┐
-        ▼                              ▼                              ▼
-┌───────────────┐              ┌───────────────┐              ┌───────────────┐
-│ Fixed-Page Engine │          │ Append-Only   │              │ Columnar &    │
-│  (Random I/O) │              │ Segment Engine│              │ Dense Vector  │
-└───────┬───────┘              └───────┬───────┘              └───────┬───────┘
-        │                              │                              │
-        ▼                              ▼                              ▼
-SQL (Postgres, MySQL)         LSM-Trees (RocksDB,             Vector (Qdrant, Milvus),
-In-Place Page Updates         MongoDB SSTables)               Time-Series (InfluxDB)
-
+```text
+Database or storage-engine code
+              |
+              v
+  FixedPageLayout / AppendOnlySegment / DenseArrayLayout
+              |
+     +--------+---------+
+     |                  |
+     v                  v
+Inode/extents       WAL transactions
+and bitmaps         + double-write zone
+     |                  |
+     +--------+---------+
+              |
+              v
+ BlockDevice (disk image, 4 KiB blocks)
 ```
 
-### 1. Random Access / Fixed-Page Layout (SQL Workloads)
+### Block device and asynchronous I/O
 
-* **Target:** PostgreSQL, MySQL, CockroachDB.
-* **Design:** Files organized as arrays of fixed pages ($8\text{KB}$ or $16\text{KB}$).
-* **Mechanism:** Supports high-speed, direct random offsets:
+`fs::BlockDevice` opens or creates a regular-file image and provides bounded
+offset-based reads and writes. The normal path requests `O_DIRECT | O_SYNC`;
+buffers and lengths are adapted to the device's 4 KiB alignment requirements.
+If direct I/O is unsupported for an operation, the implementation retries via
+a non-direct descriptor. `flush()` calls `fsync`.
 
-$$\text{Page Offset} = \text{File Header Offset} + (\text{Page ID} \times \text{Page Size})$$
+`fs::AsyncIo` wraps a liburing `io_uring` queue. It supports aligned read and
+write requests, completion waiting, and request cleanup. `BlockDevice` also
+provides synchronous wrapper methods for an asynchronous request; these submit
+and wait for that individual operation. The buffer pool uses a background
+flush thread and attempts `io_uring` for flushes, falling back to synchronous
+device I/O if ring setup is unavailable.
 
+### On-disk format and allocation
 
-* Requires in-place updates and explicit dirty-page tracking.
+The current format is version 3 and uses 4 KiB blocks. Its main regions are:
 
-### 2. Append-Only / Immutable Segment Engine (LSM & Search Workloads)
+| Region | Purpose |
+| --- | --- |
+| Blocks 0–1 | Mirrored, checksummed superblocks |
+| Inode bitmap | Tracks allocated inodes |
+| Data bitmap | Tracks allocated data-region blocks |
+| Inode table | Fixed-size 256-byte inode records |
+| WAL | Fixed-size transaction records and page images |
+| Double-write zone | Stages page images before home-block writes |
+| Data region | Allocated extents and payload blocks |
 
-* **Target:** Cassandra, RocksDB/LSM SSTables, Elasticsearch inverted indexes.
-* **Design:** Writes are strictly sequential and append-only. Pages are written once and never updated in place.
-* **Mechanism:** Allocate contiguous large extents ($64\text{MB}$ or $128\text{MB}$) to eliminate write amplification and maximize write throughput.
+The WAL and double-write zone currently reserve 16 and 8 blocks, respectively.
+The allocator finds contiguous free ranges in the data bitmap; inode extents
+are stored inline with a single indirect extent-table block for additional
+entries. The root inode and its initial directory data are created by
+`format_image`.
 
-### 3. Memory-Mapped / Dense Array Layout (Vector & Time-Series Workloads)
+### Workload-specific layouts
 
-* **Target:** Qdrant, Milvus (HNSW graphs), InfluxDB (Columnar time chunks).
-* **Design:** High-dimensional vector graphs require random node traversals across millions of dense float arrays. Time-series requires fast range scans over compressed timestamps.
-* **Mechanism:** Pre-allocated, zero-fragmentation huge extents aligned to $2\text{MB}$ boundaries (matching CPU HugePages) to accelerate cache hits during graph traversals.
+The layout API in `fs/layout_engine.hpp` currently contains:
 
----
+- **`FixedPageLayout`** — preallocates one contiguous region for fixed-size
+  pages. Page sizes must be multiples of 4 KiB. Page writes go through the
+  WAL-backed transactional block-update path.
+- **`AppendOnlySegment`** — preallocates a contiguous segment and appends
+  non-empty 4 KiB multiples. Payload data is flushed before the inode size is
+  updated, so recovery does not publish a size before the appended bytes are
+  written.
+- **`DenseArrayLayout`** — allocates a contiguous region whose start is aligned
+  to 2 MiB and whose capacity is a non-zero 2 MiB multiple. Reads and writes
+  use in-bounds 4 KiB multiples; writes use the WAL-backed page-update path.
 
-## Phase 5: Crash Consistency, WAL, and Transactions
+These APIs expose inode numbers for reopening a layout. They do not currently
+provide a directory lookup API or a complete file namespace.
 
-Physical power loss mid-write causes corrupted inodes or orphan block allocations. You must guarantee structural integrity.
+### Buffer pool
 
-### Core Concepts
+`fs::BufferPool` is an in-memory cache of pinned 4 KiB blocks. Move-only
+`PageGuard`s pin frames and can mark them dirty. The pool uses a 2Q-inspired
+cold/hot replacement policy to resist one-pass scans and a background worker
+to flush unpinned dirty pages. Call `flush_all()` when the caller needs to
+wait for flush completion and receive reported I/O errors; the destructor
+attempts a flush but cannot report errors.
 
-* **Write-Ahead Logging (WAL):** Before updating an inode or extent allocation map on disk, write the intended operation to an append-only ring buffer log segment on physical storage.
-* **Double-Write Buffer:** For page updates (SQL engines), partial page writes (torn writes) can happen if power drops mid-4KB sector flush. Maintain a separate contiguous "double-write zone" where pages are written sequentially before updating their target location.
-* **Checkpointing & Recovery:**
-1. On boot, parse the Superblock and locate the last valid log sequence number (LSN).
-2. Play forward uncommitted valid transactions from the log (Redo phase).
-3. Reclaim allocated extents that lack corresponding valid inode pointers (Undo phase).
+This cache is a separate primitive. Its dirty-page writes are not automatically
+wrapped in the filesystem WAL transaction API.
 
-### Current Implementation
+## Data path: database request to storage
 
-Format version 3 reserves mirrored superblocks at LBA 0 and 1, a 16-block WAL, and an 8-block double-write zone. The single-writer WAL records checksummed 4 KiB page images and commit records; a transaction may update up to seven distinct blocks. Inode-table and allocation-bitmap changes use this path, as do fixed-page and dense-array writes. Append-only payload data is flushed before its inode size is committed.
+For a fixed-size database page update, the current path is:
 
-Mount recovery replays only complete committed WAL transactions, checkpoints their LSN, then reconstructs inode and data allocation maps from valid inode extent references to reclaim orphaned allocations. Recovery is idempotent. The fixed WAL capacity and single-writer model are intentional limits until the concurrency work in Phase 6.
+1. The caller creates or opens a `FixedPageLayout` and selects a page ID.
+2. The layout maps that page to a byte offset in its contiguous extent.
+3. The update path divides the byte range into 4 KiB filesystem blocks.
+4. A transaction records a begin record, checksummed update headers, and
+   complete page images in the WAL.
+5. The WAL is flushed before a commit record is written and flushed.
+6. For each updated block, the new page image is flushed to a double-write
+   slot before the home block is written.
+7. After the home-block writes are flushed, the checkpoint LSN is persisted
+   to the mirrored superblocks and the WAL is cleared.
 
----
+Transactions currently support up to seven distinct blocks: the fixed 16-block
+WAL must fit a begin record, two records per update (header and page image),
+and a commit record. The eight-block double-write zone imposes the same
+seven-update practical limit in the current implementation.
 
-## Phase 6: Thread-per-Core Architecture & Concurrency
+## Crash recovery
 
-To maximize NVMe drives capable of millions of IOPS, avoid central locks (like `std::mutex`) across I/O worker threads.
+Opening a filesystem with `CrashConsistency::open` marks the filesystem as
+unclean and runs mount recovery. Recovery scans the WAL from its start, accepts
+a complete committed transaction with valid checksums, and replays its page
+images when its LSN is newer than the recorded checkpoint. A page is recovered
+from its double-write slot when valid, or from its WAL page image otherwise.
+Recovery then checkpoints the transaction, clears the WAL, and reconstructs
+inode and data allocation bitmaps from valid inode extent references to reclaim
+orphaned allocations.
 
-### Architecture Plan
+`CrashConsistency::open_for_update` also marks the filesystem as unclean before
+an update session proceeds. `shutdown()` flushes and writes the clean-shutdown
+marker. A crash-recovery integration test kills a child process after a
+committed multi-block WAL transaction and its double-write images have been
+flushed, but before the home-block writes; reopening must replay both blocks
+and preserve selected filesystem invariants.
 
-* **Thread-per-Core Execution:** Pin $N$ worker threads to $N$ CPU cores using `sched_setaffinity`.
-* **Shared-Nothing Queue Partitioning:** Each CPU core owns its own instance of `io_uring`, its own subset of free extents, and a lock-free queue.
-* **Lock-Free Extent Allocation:** Use lock-free ring buffers (`boost::lockfree::queue` or custom atomic CAS queues) to pass block allocation requests across cores without locking the superblock allocator.
+**Recovery coverage is not exhaustive.** The test suite does not yet inject
+crashes after every WAL record, during target writes, or during checkpointing.
+The crash fixture stages on-disk records directly because the production commit
+path has no failure-injection interface. This is useful recovery coverage, not
+a power-loss qualification or a guarantee against every hardware failure mode.
+
+## Concurrency model
+
+`fs::CoreWorkerPool` is an experimental thread-per-core task executor:
+
+- It discovers CPUs available to the process and pins one worker to each
+  selected CPU using `pthread_setaffinity_np`.
+- Each worker owns an `AsyncIo`/`io_uring` instance, a bounded task queue, and
+  an in-memory `ExtentAllocator` covering a disjoint block-number shard.
+- Producers dispatch tasks round-robin using an atomic counter. Task completion
+  and exceptions are reported through `std::future<void>`.
+- The task queues use atomic sequence numbers and compare-and-swap operations;
+  dispatch does not use a central task mutex.
+
+This pool does **not** make the persistent filesystem concurrent. Its worker
+extent allocators are independent in-memory allocators, not shards of the
+on-disk bitmap allocator, and the filesystem WAL manager is explicitly
+single-writer. There is no integration that makes concurrent metadata updates
+or WAL commits safe across workers. Queue saturation currently makes submitters
+spin until a slot becomes available, and the present tests are functional
+smoke coverage rather than a sustained-load or formal lock-free progress
+verification. Treat this component as a prototype.
+
+## Using the storage API
+
+The library API is C++ and operates on an already formatted image. For example,
+a storage engine can create a fixed-page region, update a page, and reopen the
+region by its inode number:
+
+```cpp
+#include "fs/block_device.hpp"
+#include "fs/disk_format.hpp"
+#include "fs/layout_engine.hpp"
+
+#include <vector>
+
+auto device = fs::BlockDevice::open("database.img", fs::BlockDevice::Mode::ReadWrite);
+const auto superblock = fs::read_superblock(device);
+
+auto pages = fs::FixedPageLayout::create(device, superblock, 1024);
+const uint64_t page_inode = pages.inode_number();
+
+std::vector<std::byte> page(fs::kBlockSize, std::byte{0x2a});
+pages.write_page(0, page);
+
+auto reopened = fs::FixedPageLayout::open(device, superblock, page_inode);
+reopened.read_page(0, page);
+```
+
+This illustrates the implemented C++ layout API; it is not a POSIX mount or a
+standalone database. Applications are responsible for storing the inode number
+and coordinating their own higher-level metadata and access policy.
+
+## Build and run
+
+### Requirements
+
+- Linux with a C++20 compiler and CMake 3.20 or newer
+- liburing development headers and library
+- pthreads (provided by the system toolchain)
+
+Configure and build:
+
+```sh
+cmake -S . -B build
+cmake --build build -j
+```
+
+Create a 64 MiB filesystem image and inspect its metadata:
+
+```sh
+./build/filesystem-mkfs database.img 67108864
+./build/filesystem-dumpfs database.img
+```
+
+The image size must be at least 128 KiB and a multiple of 4 KiB. Formatting
+initializes the entire image; it is destructive to any existing contents at
+the chosen path.
+
+Run the registered tests:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+The current CTest suite covers aligned asynchronous I/O, extent allocation,
+buffer-pool behavior, inode/extent metadata, storage layouts, WAL consistency,
+the tested crash-recovery boundary, and worker-pool behavior. The ten registered
+tests are marked serial because several existing fixtures use the shared
+`/tmp/test.img` path.
+
+`filesystem` is currently a bootstrap executable that directs users to the
+separate `filesystem-mkfs` and `filesystem-dumpfs` tools; it is not a mounted
+filesystem shell.
+
+## Implemented and verified
+
+- C++20 block-device access to regular-file images, with bounds checking,
+  alignment handling, flush support, and direct-I/O fallback.
+- A liburing request wrapper and asynchronous device read/write entry points.
+- An extent allocator that rejects out-of-range and overflowing requests and
+  validates a release before changing allocation state.
+- Version-3 metadata layout with mirrored checksummed superblocks, bitmaps,
+  inodes, extents, WAL, and double-write regions.
+- Contiguous extent allocation, inode allocation, and inline/indirect extent
+  persistence.
+- Fixed-page, append-only segment, and 2 MiB-aligned dense-array APIs.
+- A 2Q-inspired pinned buffer pool with background flush and explicit
+  `flush_all()` error reporting.
+- Single-writer WAL transactions, page-image checksums, double-write staging,
+  mount recovery, orphan-allocation reclamation, and an integration test for
+  recovery after a process kill at one committed-transaction boundary.
+- An experimental pinned worker pool with a per-worker I/O ring, task queue,
+  and in-memory extent shard.
+
+The statements above describe implemented code paths exercised by the current
+tests. They should not be interpreted as production performance claims or as
+comprehensive crash, concurrency, or hardware validation.
+
+### Test coverage
+
+Build and run all registered tests with:
+
+```sh
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+CTest registers ten executables:
+
+| Test | Additional behavior checked |
+| --- | --- |
+| `test-async-io` | Aligned liburing read/write round trip |
+| `test-extent` | Empty/oversized allocation, contiguous reuse, fragmentation, overflow-safe bounds, and atomic rejection of partial/double release |
+| `test-buffer-pool` | 2Q scan resistance, dirty flush persistence, pinned-frame exhaustion, and frame reuse after unpin |
+| `test-metadata` | WAL-backed extent allocation/release and indirect extent-table persistence |
+| `test-layout` | Layout create/open/read/write paths plus invalid geometry, page IDs, sizes, and capacity bounds |
+| `test-crash-consistency` | Multi-block WAL transaction, double-write staging, orphan reclamation, idempotence, and mirrored superblock fallback |
+| `test-crash-recovery` | Child-process termination after committed WAL and double-write staging, followed by replay and invariant checks |
+| `test-core-worker-pool` | Four concurrent producers submitting 1,024 tasks, worker affinity/shards, simultaneous execution, task exception propagation, and queued-task draining at destruction |
+| `test-block-device` | Partial and aligned I/O, close/reopen persistence, bounds rejection, and read-only write rejection |
+| `test-wal-recovery-edges` | Ignore incomplete transactions and reject committed transactions whose WAL and double-write page images both fail checksum validation |
+
+These are functional tests, not benchmarks or exhaustive stress/fault-injection
+tests. In particular, the worker-pool test exercises concurrent submission and
+task execution at a bounded workload; it does not prove formal lock-free
+progress or production behavior under sustained load. WAL crash injection still
+covers only selected recovery boundaries.
+
+## Limitations and next work
+
+- There is no kernel module, FUSE layer, mount support, POSIX directory/file
+  namespace, or complete filesystem command-line interface.
+- The WAL is fixed-capacity and single-writer; persistent metadata allocation
+  is not safe for concurrent writers.
+- Crash injection covers only a subset of the WAL/double-write/checkpoint
+  sequence. Additional injection points and recovery invariants are needed.
+- The worker pool needs stronger queue progress guarantees, explicit
+  backpressure/shutdown semantics, and high-load stress testing before it can
+  support concurrent filesystem mutations.
+- Several tests still use a shared `/tmp/test.img` fixture path; CTest therefore
+  runs them serially. Giving every fixture a unique temporary image would allow
+  safe parallel test execution.
+- Buffer-pool dirty flushing is not integrated with WAL ordering.
+- There are no benchmarks or verified throughput/latency claims in this
+  repository.
+
+## Repository map
+
+| Path | Contents |
+| --- | --- |
+| `include/fs/` | Public storage, metadata, layout, recovery, and worker APIs |
+| `src/` | Block device, async I/O, allocator, buffer pool, metadata, WAL, and worker implementations |
+| `tools/` | Image-formatting and metadata-inspection executables |
+| `tests/` | Standalone component tests and the CTest crash-recovery/worker tests |

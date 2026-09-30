@@ -53,6 +53,9 @@ CrashConsistency CrashConsistency::open(BlockDevice& device) {
 
 CrashConsistency CrashConsistency::open_for_update(BlockDevice& device) {
     CrashConsistency consistency(device, read_superblock(device));
+    consistency.superblock_.clean_shutdown = 0;
+    write_superblock(device, consistency.superblock_);
+    device.flush();
     consistency.recover(false);
     return consistency;
 }
